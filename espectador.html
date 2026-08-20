@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NanFlix - Espectador & Seeder P2P</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/webtorrent@latest/webtorrent.min.js"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen font-sans pb-10">
+
+  <div class="max-w-5xl mx-auto px-4 py-6">
+    <header class="flex justify-between items-center mb-8 border-b border-gray-800 pb-4">
+      <div class="flex items-center gap-2">
+        <span class="text-3xl">🍿</span>
+        <h1 class="text-2xl font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">
+          NanFlix P2P
+        </h1>
+      </div>
+      <div class="flex items-center gap-2 bg-gray-800 px-3 py-1.5 rounded-full border border-gray-700">
+        <div id="status-indicator" class="w-3 h-3 rounded-full bg-amber-500"></div>
+        <span id="status-text" class="text-xs font-medium text-amber-400">Esperando Magnet Link...</span>
+      </div>
+    </header>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+      <div class="lg:col-span-2 space-y-6">
+
+        <div class="bg-gray-800 p-5 rounded-xl border border-gray-700 space-y-4">
+          <h2 class="text-lg font-semibold text-gray-200">1. Conexión a la Red</h2>
+
+          <div>
+            <label class="block text-xs font-medium text-gray-400 mb-1">Magnet Link del Video</label>
+            <input type="text" id="magnet-input" placeholder="magnet:?xt=urn:btih:..." 
+              class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-cyan-500">
+          </div>
+
+          <div>
+            <label class="block text-xs font-medium text-gray-400 mb-1">Tu Billetera Nano (Para recibir ganancias de Seeder)</label>
+            <input type="text" id="seeder-wallet-input" placeholder="nano_3..." 
+              class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-purple-500">
+          </div>
+
+          <button id="btn-connect" onclick="conectarTorrent()" 
+            class="w-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white font-semibold py-2.5 rounded-lg transition-all shadow-lg shadow-cyan-500/20">
+            🌐 Cargar & Iniciar Streaming P2P
+          </button>
+        </div>
+
+        <div class="bg-black rounded-xl border border-gray-800 overflow-hidden shadow-2xl relative min-h-[300px] flex items-center justify-center">
+          <div id="media-container" class="w-full h-full flex items-center justify-center text-gray-500 text-sm">
+            <span> El video aparecerá aquí tras cargar el Magnet Link</span>
+          </div>
+        </div>
+
+        <div class="bg-gray-950 p-4 rounded-xl border border-gray-800">
+          <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Logs del Protocolo de Red</h3>
+          <div id="logs" class="h-36 overflow-y-auto font-mono text-xs space-y-1 pr-2"></div>
+        </div>
+
+      </div>
+
+      <div class="space-y-6">
+
+        <div class="bg-gray-800 p-5 rounded-xl border border-gray-700 space-y-4">
+          <h2 class="text-lg font-semibold text-gray-200">📊 Métricas en Tiempo Real</h2>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div class="bg-gray-900 p-3 rounded-lg border border-gray-800">
+              <span class="text-xs text-gray-400 block">Peers Conectados</span>
+              <span id="num-peers" class="text-xl font-bold text-cyan-400">0</span>
+            </div>
+            <div class="bg-gray-900 p-3 rounded-lg border border-gray-800">
+              <span class="text-xs text-gray-400 block">Vel. Descarga</span>
+              <span id="download-speed" class="text-xl font-bold text-emerald-400">0 KB/s</span>
+            </div>
+            <div class="bg-gray-900 p-3 rounded-lg border border-gray-800">
+              <span class="text-xs text-gray-400 block">Piezas Validadas</span>
+              <span id="pieces-count" class="text-sm font-semibold text-gray-200">0 / 0</span>
+            </div>
+            <div class="bg-gray-900 p-3 rounded-lg border border-gray-800">
+              <span class="text-xs text-gray-400 block">Progreso</span>
+              <span id="download-progress" class="text-sm font-semibold text-blue-400">0%</span>
+            </div>
+          </div>
+
+          <div class="border-t border-gray-700 pt-3 space-y-2 text-xs">
+            <div class="flex justify-between">
+              <span class="text-gray-400">Precio / Pieza:</span>
+              <span class="font-mono text-amber-400">0.000001 XNO</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-400">Piezas Subidas (Seeder):</span>
+              <span id="uploaded-pieces" class="font-mono text-purple-400">0 piezas</span>
+            </div>
+            <div class="flex justify-between font-semibold">
+              <span class="text-gray-300">Ganancias Estimadas Seeder:</span>
+              <span id="seeder-earnings" class="font-mono text-emerald-400">0.000000 XNO</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-gray-800 p-5 rounded-xl border border-gray-700 space-y-3">
+          <div class="flex justify-between items-center">
+            <h2 class="text-sm font-semibold text-gray-200">📜 Vale Off-Chain (JSON)</h2>
+            <span id="total-amount" class="text-xs font-bold bg-amber-500/10 text-amber-400 px-2 py-1 rounded border border-amber-500/20">0.000000 XNO</span>
+          </div>
+          <pre id="voucher-preview" class="bg-gray-950 p-3 rounded-lg text-[10px] font-mono text-gray-300 overflow-x-auto h-40 border border-gray-800">
+{ "info": "Esperando inicio de streaming..." }
+          </pre>
+          
+          <button id="btn-settle" onclick="liquidarPagosConExtension()" disabled
+            class="w-full bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 disabled:opacity-50 text-white font-bold py-3 rounded-lg transition-all shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2">
+            ⚡ Liquidar y Pagar con Extension
+          </button>
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    // ============================================================
+    // ESTADO GLOBAL & WEBTORRENT
+    // ============================================================
+    const client = new WebTorrent();
+    let currentTorrent = null;
+    let piecesDownloaded = 0;
+    let bytesUploadedTotal = 0;
+    const PRICE_PER_PIECE = 0.000001;
+
+    const peerWalletMap = {};
+    const peerBytesMap = {};
+
+    const wallets = {
+      creator: "",
+      mySeederWallet: "",
+      seeders: {}
+    };
+
+    function esNanoWalletValida(address) {
+      if (!address || typeof address !== 'string') return false;
+      return /^nano_[13][13456789abcdefghijkmnopqrstuwxyz]{59}$/i.test(address);
+    }
+
+    function getPeerKey(wire) {
+      return wire.peerId
+        ? (typeof wire.peerId === 'string' ? wire.peerId : Buffer.from(wire.peerId).toString('hex'))
+        : (wire._remoteAddress || 'peer_' + Math.random().toString(36).substring(7));
+    }
+
+    function log(msg, color = 'text-gray-300') {
+      const logsEl = document.getElementById('logs');
+      if (!logsEl) return;
+      const time = new Date().toLocaleTimeString();
+      logsEl.innerHTML += `<div class="${color}">[${time}] ${msg}</div>`;
+      logsEl.scrollTop = logsEl.scrollHeight;
+    }
+
+    function actualizarIndicador(activo, texto) {
+      const ind = document.getElementById('status-indicator');
+      const txt = document.getElementById('status-text');
+      if (!ind || !txt) return;
+      ind.className = activo ? 'w-3 h-3 rounded-full bg-emerald-500 animate-pulse' : 'w-3 h-3 rounded-full bg-amber-500';
+      txt.className = activo ? 'text-xs font-medium text-emerald-400' : 'text-xs font-medium text-amber-400';
+      txt.innerText = texto;
+    }
+
+    // ============================================================
+    // EXTENSIÓN BEP 10 NANO
+    // ============================================================
+    class NanoExtension {
+      constructor(wire) { this._wire = wire; }
+      onExtendedHandshake() { this.enviarMiWallet(); }
+      enviarMiWallet() {
+        if (wallets.mySeederWallet && esNanoWalletValida(wallets.mySeederWallet)) {
+          try {
+            const payload = JSON.stringify({ nanoWallet: wallets.mySeederWallet });
+            this._wire.extended('nano_handshake', payload);
+          } catch (e) {}
+        }
+      }
+      onMessage(buf) {
+        try {
+          const rawStr = buf.toString('utf8');
+          const match = rawStr.match(/\{[\s\S]*\}/);
+          if (!match) return;
+          const parsed = JSON.parse(match[0]);
+
+          if (parsed && parsed.nanoWallet && esNanoWalletValida(parsed.nanoWallet)) {
+            const walletRecibida = parsed.nanoWallet;
+            const peerKey = getPeerKey(this._wire);
+            peerWalletMap[peerKey] = walletRecibida;
+            wallets.seeders[peerKey] = walletRecibida;
+            if (peerBytesMap[peerKey] === undefined) peerBytesMap[peerKey] = 0;
+            log(`🔑 [NANO HANDSHAKE] Wallet registrada: ${walletRecibida.substring(0, 16)}...`, "text-emerald-400");
+            actualizarValeReal();
+          }
+        } catch (e) {}
+      }
+    }
+    NanoExtension.prototype.name = 'nano_handshake';
+
+    // Extraer Wallet del Creador desde el Magnet Link o Parámetros (dn/announce)
+    function extraerCreadorWalletDelMagnet(magnetURI) {
+      const match = magnetURI.match(/creator=(nano_[13][13456789abcdefghijkmnopqrstuwxyz]{59})/i);
+      return match ? match[1] : "";
+    }
+
+    // ============================================================
+    // LÓGICA DE TORRENT & CONEXIÓN
+    // ============================================================
+    function conectarTorrent() {
+      const magnetURI = document.getElementById('magnet-input').value.trim();
+      const seederWallet = document.getElementById('seeder-wallet-input').value.trim();
+
+      if (!magnetURI) {
+        alert("Ingresa un Magnet Link válido.");
+        return;
+      }
+
+      wallets.mySeederWallet = seederWallet;
+      wallets.creator = extraerCreadorWalletDelMagnet(magnetURI);
+
+      if (!wallets.creator) {
+        // Prompt fallback si el magnet no traía la etiqueta creator=
+        wallets.creator = prompt("Ingresa la billetera Nano del Creador de este torrent:", "nano_33aun363giymh3nwjx7jenn7ctm8j876obqnfwymqyqp5fct9ysmwizu6oh6") || "";
+      }
+
+      log(`👤 Creador identificado: ${wallets.creator ? wallets.creator.substring(0, 16) + '...' : 'No definido'}`, "text-amber-400");
+      if (wallets.mySeederWallet) log(`🔑 Mi Wallet Seeder: ${wallets.mySeederWallet.substring(0, 16)}...`, "text-purple-400");
+
+      actualizarIndicador(false, "Conectando a Nodos P2P...");
+      document.getElementById('btn-connect').disabled = true;
+
+      currentTorrent = client.add(magnetURI, (torrent) => {
+        log(`✔ Torrent cargado: ${torrent.name}`, "text-emerald-400");
+        actualizarIndicador(true, "Streaming Activo");
+
+        const file = torrent.files.find(f => f.name.match(/\.(mp4|webm|mp3)$/i));
+        if (file) {
+          const container = document.getElementById('media-container');
+          container.innerHTML = '';
+          file.appendTo(container, { autoplay: true, controls: true });
+        }
+        document.getElementById('btn-settle').disabled = false;
+        actualizarMetricas();
+      });
+
+      currentTorrent.on('wire', (wire) => {
+        const peerKey = getPeerKey(wire);
+        wire.use(NanoExtension);
+        if (peerBytesMap[peerKey] === undefined) peerBytesMap[peerKey] = 0;
+
+        setTimeout(() => {
+          if (wallets.mySeederWallet && esNanoWalletValida(wallets.mySeederWallet)) {
+            try {
+              wire.extended('nano_handshake', JSON.stringify({ nanoWallet: wallets.mySeederWallet }));
+            } catch (e) {}
+          }
+        }, 500);
+
+        wire.on('download', (bytes) => {
+          peerBytesMap[peerKey] += bytes;
+          actualizarValeReal();
+        });
+
+        wire.on('upload', (bytes) => {
+          bytesUploadedTotal += bytes;
+          actualizarMetricas();
+        });
+
+        log(`🤝 Conexión P2P establecida con peer: ${peerKey.substring(0, 10)}...`, "text-purple-400");
+      });
+
+      currentTorrent.on('download', () => actualizarMetricas());
+      setInterval(() => { if (currentTorrent) actualizarMetricas(); }, 1000);
+    }
+
+    // ============================================================
+    // MÉTRICAS Y GENERACIÓN DE VALE
+    // ============================================================
+    function actualizarMetricas() {
+      if (!currentTorrent) return;
+
+      const totalPiezas = currentTorrent.pieces ? currentTorrent.pieces.length : 0;
+      let completadas = 0;
+      if (currentTorrent.bitfield) {
+        for (let i = 0; i < currentTorrent.pieces.length; i++) {
+          if (currentTorrent.bitfield.get(i)) completadas++;
+        }
+      }
+
+      if (completadas !== piecesDownloaded) {
+        piecesDownloaded = completadas;
+        actualizarValeReal();
+      }
+
+      document.getElementById('num-peers').innerText = currentTorrent.numPeers;
+      document.getElementById('download-speed').innerText = `${((currentTorrent.downloadSpeed || 0) / 1024).toFixed(1)} KB/s`;
+      document.getElementById('download-progress').innerText = `${((currentTorrent.progress || 0) * 100).toFixed(1)}%`;
+      document.getElementById('pieces-count').innerText = `${piecesDownloaded} / ${totalPiezas}`;
+
+      // Estimación de lo subido como Seeder
+      const piezasSubidas = Math.floor(bytesUploadedTotal / (currentTorrent.pieceLength || 16384));
+      document.getElementById('uploaded-pieces').innerText = `${piezasSubidas} piezas (${(bytesUploadedTotal / 1024 / 1024).toFixed(2)} MB)`;
+      
+      const miGananciaEstimada = (piezasSubidas * PRICE_PER_PIECE * 0.30).toFixed(6);
+      document.getElementById('seeder-earnings').innerText = `${miGananciaEstimada} XNO`;
+    }
+
+    function actualizarValeReal() {
+      const totalAmount = (piecesDownloaded * PRICE_PER_PIECE);
+      const creatorAmount = (totalAmount * 0.60);
+      const platformAmount = (totalAmount * 0.10);
+      const seedersPool = (totalAmount * 0.30);
+
+      const seedersDistribution = {};
+      let totalValidBytes = 0;
+
+      for (const peerKey in peerWalletMap) {
+        const wallet = peerWalletMap[peerKey];
+        const bytes = peerBytesMap[peerKey] || 0;
+        if (esNanoWalletValida(wallet) && bytes > 0) totalValidBytes += bytes;
+      }
+
+      if (totalValidBytes > 0) {
+        for (const peerKey in peerWalletMap) {
+          const wallet = peerWalletMap[peerKey];
+          const bytes = peerBytesMap[peerKey] || 0;
+          if (esNanoWalletValida(wallet) && bytes > 0) {
+            const share = (bytes / totalValidBytes) * seedersPool;
+            if (!seedersDistribution[wallet]) seedersDistribution[wallet] = 0;
+            seedersDistribution[wallet] += share;
+          }
+        }
+      }
+
+      const seedersFormatted = {};
+      Object.keys(seedersDistribution).forEach(w => {
+        seedersFormatted[w] = seedersDistribution[w].toFixed(6);
+      });
+
+      const voucher = {
+        torrentInfoHash: currentTorrent ? currentTorrent.infoHash : "N/A",
+        creadorWallet: wallets.creator,
+        piezasValidadas: piecesDownloaded,
+        montoTotalXNO: totalAmount.toFixed(6),
+        desgloseLiquidacion: {
+          creador_60: creatorAmount.toFixed(6),
+          plataforma_10: platformAmount.toFixed(6),
+          seeders_30: seedersFormatted
+        }
+      };
+
+      document.getElementById('voucher-preview').innerText = JSON.stringify(voucher, null, 2);
+      document.getElementById('total-amount').innerText = `${totalAmount.toFixed(6)} XNO`;
+    }
+
+    // ============================================================
+// LIQUIDACIÓN Y PAGO CON EXTENSIÓN (Sincronizado)
+// ============================================================
+
+// Función auxiliar para enviar un pago y esperar a que la extensión responda
+function enviarPagoYSincronizar(pagoItem) {
+  return new Promise((resolve) => {
+    
+    // Handler para escuchar la respuesta específica de este pago
+    function onRespuesta(event) {
+      if (event.data && event.data.type === "CLEANWEB_PAGO_RESPUESTA") {
+        window.removeEventListener("message", onRespuesta); // Limpiar listener
+        if (event.data.exito) {
+          log(`✅ Pago a ${pagoItem.concepto} confirmado. Hash: ${event.data.hash}`, "text-emerald-400");
+          resolve(true);
+        } else {
+          log(`❌ Pago a ${pagoItem.concepto} falló: ${event.data.error || 'Error desconocido'}`, "text-red-400");
+          resolve(false);
+        }
+      }
+    }
+
+    // Escuchar la respuesta de la extensión
+    window.addEventListener("message", onRespuesta);
+
+    // Disparar el mensaje a la extensión
+    window.postMessage({
+      type: "CLEANWEB_MICROPAGO_TRIGGER",
+      direccionDestino: pagoItem.destino,
+      montoXNO: parseFloat(pagoItem.monto),
+      concepto: `Liquidación P2P - ${pagoItem.concepto}`
+    }, "*");
+  });
+}
+
+async function liquidarPagosConExtension() {
+  const voucherText = document.getElementById('voucher-preview').innerText;
+  let voucher;
+  try { 
+    voucher = JSON.parse(voucherText); 
+  } catch (e) { 
+    return alert("Vale inválido"); 
+  }
+
+  const desglose = voucher.desgloseLiquidacion;
+  const listaPagos = [];
+
+  // 1. Pago al Creador (60%)
+  if (parseFloat(desglose.creador_60) > 0 && esNanoWalletValida(voucher.creadorWallet)) {
+    listaPagos.push({ destino: voucher.creadorWallet, monto: desglose.creador_60, concepto: "Creador (60%)" });
+  }
+
+  // 2. Pagos a Seeders (30%)
+  if (desglose.seeders_30) {
+    Object.entries(desglose.seeders_30).forEach(([walletSeeder, montoSeeder]) => {
+      if (parseFloat(montoSeeder) > 0 && esNanoWalletValida(walletSeeder)) {
+        listaPagos.push({ destino: walletSeeder, monto: montoSeeder, concepto: "Seeder P2P (30%)" });
+      }
+    });
+  }
+
+  if (listaPagos.length === 0) return alert("Monto acumulado insuficiente para pagar.");
+
+  const btnSettle = document.getElementById('btn-settle');
+  if (btnSettle) btnSettle.disabled = true;
+
+  log(`🚀 Iniciando liquidación secuencial para ${listaPagos.length} destino(s)...`, "text-amber-400");
+
+  // 3. Procesar estrictamente UNO POR UNO (esperando confirmación on-chain)
+  for (let i = 0; i < listaPagos.length; i++) {
+    const item = listaPagos[i];
+    log(`📡 [${i + 1}/${listaPagos.length}] Procesando pago a ${item.concepto} (${item.monto} XNO)...`, "text-indigo-300");
+
+    // Esperar hasta que el pago N termine de confirmarse antes de pasar al N+1
+    const exito = await enviarPagoYSincronizar(item);
+    
+    if (!exito) {
+      log(`⚠️ Hubo un error en el pago actual. Deteniendo la secuencia por seguridad.`, "text-amber-400");
+      break;
+    }
+
+    // Pequeña pausa extra de 500ms para asegurar que la extensión refresque la frontera del bloque
+    await new Promise(r => setTimeout(r, 500));
+  }
+
+  log(`🎉 Fin del proceso de liquidación.`, "text-emerald-300");
+  if (btnSettle) btnSettle.disabled = false;
+}
+  </script>
+</body>
+</html>

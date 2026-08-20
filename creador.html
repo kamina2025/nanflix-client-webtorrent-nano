@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NanFlix - Panel del Creador</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/webtorrent@latest/webtorrent.min.js"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen font-sans pb-10">
+
+  <div class="max-w-4xl mx-auto px-4 py-6">
+    <header class="flex justify-between items-center mb-8 border-b border-gray-800 pb-4">
+      <div class="flex items-center gap-2">
+        <span class="text-3xl">🎬</span>
+        <h1 class="text-2xl font-bold bg-gradient-to-r from-amber-400 to-orange-500 bg-clip-text text-transparent">
+          NanFlix Studio (Creador)
+        </h1>
+      </div>
+      <span class="bg-amber-500/10 text-amber-400 border border-amber-500/20 text-xs px-3 py-1 rounded-full font-semibold">
+        Modo Publicador P2P
+      </span>
+    </header>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+      <div class="space-y-6">
+        <div class="bg-gray-800 p-5 rounded-xl border border-gray-700 space-y-4">
+          <h2 class="text-lg font-semibold text-gray-200">1. Configuración de Autoría</h2>
+
+          <div>
+            <label class="block text-xs font-medium text-gray-400 mb-1">Tu Billetera Nano (Recibe el 60% de las reproducciones)</label>
+            <input type="text" id="creator-wallet" placeholder="nano_3..." 
+              class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-amber-500">
+          </div>
+
+          <div>
+            <label class="block text-xs font-medium text-gray-400 mb-1">Seleccionar Archivo de Video / Audio</label>
+            <input type="file" id="file-input" accept="video/mp4,video/webm,audio/mp3" 
+              class="w-full text-xs text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-amber-500/10 file:text-amber-400 hover:file:bg-amber-500/20 cursor-pointer">
+          </div>
+
+          <button id="btn-seed" onclick="crearYSembrarTorrent()" 
+            class="w-full bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white font-bold py-2.5 rounded-lg transition-all shadow-lg shadow-amber-500/20">
+            🚀 Publicar Contenido & Generar Magnet Link
+          </button>
+        </div>
+
+        <div class="bg-gray-800 p-5 rounded-xl border border-gray-700 space-y-3">
+          <h2 class="text-sm font-semibold text-gray-200">2. Magnet Link Generado</h2>
+          <textarea id="generated-magnet" readonly rows="4" placeholder="El Magnet Link se generará aquí..." 
+            class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2.5 text-xs font-mono text-cyan-300 focus:outline-none resize-none"></textarea>
+          
+          <button id="btn-copy" onclick="copiarMagnet()" disabled 
+            class="w-full bg-gray-700 hover:bg-gray-600 text-gray-200 font-semibold py-2 rounded-lg text-xs transition-all disabled:opacity-50">
+            📋 Copiar Magnet Link para Espectadores
+          </button>
+        </div>
+      </div>
+
+      <div class="space-y-6">
+        <div class="bg-gray-800 p-5 rounded-xl border border-gray-700 space-y-4">
+          <h2 class="text-lg font-semibold text-gray-200">📡 Monitor de Sembrado en Vivo</h2>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div class="bg-gray-900 p-3 rounded-lg border border-gray-800">
+              <span class="text-xs text-gray-400 block">Espectadores / Peers</span>
+              <span id="creator-peers" class="text-2xl font-bold text-amber-400">0</span>
+            </div>
+            <div class="bg-gray-900 p-3 rounded-lg border border-gray-800">
+              <span class="text-xs text-gray-400 block">Vel. de Subida</span>
+              <span id="creator-upload-speed" class="text-2xl font-bold text-emerald-400">0 KB/s</span>
+            </div>
+          </div>
+
+          <div class="bg-gray-900 p-4 rounded-lg border border-gray-800 space-y-2">
+            <span class="text-xs text-gray-400 block">Ganancias Estimadas por Autoría (60%)</span>
+            <div class="flex justify-between items-baseline">
+              <span id="authorship-earnings" class="text-2xl font-bold text-emerald-400">0.000000 XNO</span>
+              <span id="total-served-pieces" class="text-xs text-gray-500">0 piezas servidas</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-gray-950 p-4 rounded-xl border border-gray-800">
+          <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Logs del Seeding de Origen</h3>
+          <div id="creator-logs" class="h-40 overflow-y-auto font-mono text-xs space-y-1 pr-2"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    const client = new WebTorrent();
+    let seedingTorrent = null;
+    let totalUploadedBytes = 0;
+    const PRICE_PER_PIECE = 0.000001;
+
+    function creatorLog(msg, color = 'text-gray-300') {
+      const logsEl = document.getElementById('creator-logs');
+      if (!logsEl) return;
+      const time = new Date().toLocaleTimeString();
+      logsEl.innerHTML += `<div class="${color}">[${time}] ${msg}</div>`;
+      logsEl.scrollTop = logsEl.scrollHeight;
+    }
+
+    function crearYSembrarTorrent() {
+      const wallet = document.getElementById('creator-wallet').value.trim();
+      const fileInput = document.getElementById('file-input');
+
+      if (!wallet || !/^nano_[13][13456789abcdefghijkmnopqrstuwxyz]{59}$/i.test(wallet)) {
+        alert("Por favor ingresa una dirección de Billetera Nano válida.");
+        return;
+      }
+
+      if (!fileInput.files || fileInput.files.length === 0) {
+        alert("Por favor selecciona un archivo multimedia para sembrar.");
+        return;
+      }
+
+      const file = fileInput.files[0];
+      creatorLog(`📦 Procesando archivo: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)...`, "text-amber-400");
+
+      // Opciones de creación con Trackers WebRTC públicos estándar
+      const opts = {
+        announce: [
+          'wss://tracker.openwebtorrent.com',
+          'wss://tracker.btorrent.xyz',
+          'wss://tracker.files.fm:443/announce'
+        ]
+      };
+
+      client.seed(file, opts, (torrent) => {
+        seedingTorrent = torrent;
+
+        // Construir Magnet Link personalizado enriquecido con la wallet del Creador
+        const magnetBase = torrent.magnetURI;
+        const magnetConWallet = `${magnetBase}&creator=${wallet}`;
+
+        document.getElementById('generated-magnet').value = magnetConWallet;
+        document.getElementById('btn-copy').disabled = false;
+
+        creatorLog(`✅ ¡Torrent creado con éxito! InfoHash: ${torrent.infoHash.substring(0, 10)}...`, "text-emerald-400");
+        creatorLog(`📡 Sembrando archivo en la red P2P...`, "text-blue-400");
+
+        torrent.on('wire', (wire) => {
+          creatorLog(`🤝 Un espectador se ha conectado para descargar.`, "text-purple-400");
+          wire.on('upload', (bytes) => {
+            totalUploadedBytes += bytes;
+            actualizarMetricasCreador();
+          });
+        });
+      });
+
+      setInterval(() => { if (seedingTorrent) actualizarMetricasCreador(); }, 1000);
+    }
+
+    function actualizarMetricasCreador() {
+      if (!seedingTorrent) return;
+
+      document.getElementById('creator-peers').innerText = seedingTorrent.numPeers;
+      document.getElementById('creator-upload-speed').innerText = `${((seedingTorrent.uploadSpeed || 0) / 1024).toFixed(1)} KB/s`;
+
+      const pieceLength = seedingTorrent.pieceLength || 16384;
+      const piezasServidas = Math.floor(totalUploadedBytes / pieceLength);
+
+      document.getElementById('total-served-pieces').innerText = `${piezasServidas} piezas entregadas`;
+
+      // Ganancia del 60% por derechos de autoría
+      const gananciaCreador = (piezasServidas * PRICE_PER_PIECE * 0.60).toFixed(6);
+      document.getElementById('authorship-earnings').innerText = `${gananciaCreador} XNO`;
+    }
+
+    function copiarMagnet() {
+      const copyText = document.getElementById('generated-magnet');
+      copyText.select();
+      navigator.clipboard.writeText(copyText.value);
+      alert("¡Magnet Link copiado al portapapeles!");
+    }
+  </script>
+</body>
+</html>
