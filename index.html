@@ -4,289 +4,114 @@
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>NanFlix P2P Persistent Node MVP</title>
+
+        <script>
+            window.tailwind = { config: { suppressWarnings: true } };
+        </script>
         <script src="https://cdn.tailwindcss.com"></script>
+
         <script src="nanocurrency.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/webtorrent@latest/webtorrent.min.js"></script>
         <link rel="manifest" href="manifest.json" />
+
+        <script src="components/header-bar.js" defer></script>
+        <script src="components/sidebar-filters.js" defer></script>
+        <script src="components/torrents-table.js" defer></script>
+        <script src="components/details-panel.js" defer></script>
+        <script src="components/modals-container.js" defer></script>
     </head>
     <body class="bg-slate-950 text-slate-200 h-full flex flex-col font-sans select-none overflow-hidden">
-        <header
-            class="bg-slate-900 border-b border-slate-800 px-4 py-2.5 flex items-center justify-between gap-2 text-xs shrink-0">
-            <div class="flex items-center gap-2">
-                <span class="text-xl">🎬</span>
-                <h1
-                    class="text-sm font-bold bg-gradient-to-r from-cyan-400 to-amber-400 bg-clip-text text-transparent hidden sm:inline">
-                    NanFlix Node MVP
-                </h1>
-                <div class="h-4 w-[1px] bg-slate-800 mx-1 hidden sm:block"></div>
-                <button
-                    onclick="abrirModal('modal-magnet')"
-                    class="bg-cyan-600 hover:bg-cyan-500 text-white font-semibold px-3 py-1.5 rounded flex items-center gap-1.5 shadow">
-                    ➕ <span>Añadir Magnet</span>
-                </button>
-                <button
-                    onclick="abrirModal('modal-crear')"
-                    class="bg-amber-600 hover:bg-amber-500 text-white font-semibold px-3 py-1.5 rounded flex items-center gap-1.5 shadow">
-                    🚀 <span>Crear Magnet</span>
-                </button>
-            </div>
-
-            <div
-                onclick="abrirModal('modal-wallet')"
-                class="bg-slate-950 border border-slate-800 hover:border-slate-700 px-3 py-1.5 rounded-lg flex items-center gap-2 cursor-pointer transition-all">
-                <span id="wallet-badge" class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span class="text-xs font-mono text-cyan-300" id="toolbar-wallet-address">nano_sin_configurar</span>
-                <span
-                    class="text-[10px] bg-purple-500/20 text-purple-400 border border-purple-500/30 px-1.5 py-0.5 rounded font-bold"
-                    >XNO</span
-                >
-            </div>
-        </header>
+        <nanflix-header></nanflix-header>
 
         <div class="flex-grow flex overflow-hidden">
-            <aside
-                class="w-48 bg-slate-900/60 border-r border-slate-800 p-2 space-y-4 text-xs shrink-0 hidden md:block">
-                <div>
-                    <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500 px-2 mb-1">
-                        Estatus Nodales
-                    </div>
-                    <ul class="space-y-0.5">
-                        <li>
-                            <button
-                                id="filter-btn-todos"
-                                onclick="filtrarTorrents('todos')"
-                                class="w-full flex justify-between items-center px-2 py-1.5 rounded bg-cyan-500/10 text-cyan-400 font-semibold">
-                                <span>📥 Todos</span>
-                            </button>
-                        </li>
-                        <li>
-                            <button
-                                id="filter-btn-descargando"
-                                onclick="filtrarTorrents('descargando')"
-                                class="w-full flex justify-between items-center px-2 py-1.5 rounded text-slate-400 hover:bg-slate-800">
-                                <span>⬇️ Descargando</span>
-                            </button>
-                        </li>
-                        <li>
-                            <button
-                                id="filter-btn-sembrando"
-                                onclick="filtrarTorrents('sembrando')"
-                                class="w-full flex justify-between items-center px-2 py-1.5 rounded text-slate-400 hover:bg-slate-800">
-                                <span>⬆️ Sembrando</span>
-                            </button>
-                        </li>
-                    </ul>
-                </div>
-
-                <div>
-                    <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500 px-2 mb-1">
-                        Pagos & Billetera
-                    </div>
-                    <ul class="space-y-0.5">
-                        <li>
-                            <button
-                                onclick="abrirModal('modal-wallet')"
-                                class="w-full flex justify-between items-center px-2 py-1.5 rounded text-slate-400 hover:bg-slate-800">
-                                <span>🔑 Configurar Wallet</span>
-                            </button>
-                        </li>
-                    </ul>
-                </div>
-            </aside>
+            <nanflix-sidebar class="shrink-0 hidden md:block"></nanflix-sidebar>
 
             <main class="flex-grow flex flex-col min-w-0 bg-slate-950">
-                <div class="flex-grow overflow-y-auto">
-                    <table class="w-full text-left text-xs text-slate-300">
-                        <thead
-                            class="bg-slate-900/90 sticky top-0 text-[11px] text-slate-400 uppercase font-semibold border-b border-slate-800">
-                            <tr>
-                                <th class="p-2.5">Estado</th>
-                                <th class="p-2.5">Nombre / InfoHash</th>
-                                <th class="p-2.5">Progreso</th>
-                                <th class="p-2.5">Peers</th>
-                                <th class="p-2.5">Vel. Red</th>
-                                <th class="p-2.5">Ganancias Est.</th>
-                            </tr>
-                        </thead>
-                        <tbody id="torrents-table-body" class="divide-y divide-slate-800/50 font-mono"></tbody>
-                    </table>
-                </div>
+                <nanflix-torrents-table class="flex-grow overflow-y-auto"></nanflix-torrents-table>
 
-                <section class="h-64 border-t border-slate-800 bg-slate-900/80 flex flex-col shrink-0">
-                    <div class="flex border-b border-slate-800 bg-slate-950 text-xs">
-                        <button
-                            onclick="cambiarTabDetalle('reproductor')"
-                            id="tab-btn-reproductor"
-                            class="px-4 py-2 font-semibold border-b-2 border-cyan-500 text-cyan-400">
-                            🎥 Reproductor & Streaming
-                        </button>
-                        <button
-                            onclick="cambiarTabDetalle('liquidaciones')"
-                            id="tab-btn-liquidaciones"
-                            class="px-4 py-2 font-semibold text-slate-400 hover:text-slate-200">
-                            💎 Liquidación y Handshake Nano
-                        </button>
-                    </div>
-
-                    <div class="flex-grow p-3 overflow-y-auto">
-                        <div id="tab-content-reproductor" class="h-full flex items-center justify-center">
-                            <video
-                                id="video-player"
-                                controls
-                                class="max-h-full max-w-full rounded bg-black hidden"></video>
-                            <span id="player-placeholder" class="text-xs text-slate-500 font-mono"
-                                >Selecciona o descarga un torrent para comenzar la reproducción P2P.</span
-                            >
-                        </div>
-
-                        <div id="tab-content-liquidaciones" class="hidden space-y-3 font-mono text-xs">
-                            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                <div class="bg-slate-950 p-3 rounded border border-slate-800">
-                                    <span class="text-slate-400 block text-[10px]">Piezas Servidas / Recibidas</span>
-                                    <span id="stat-piezas-total" class="text-lg font-bold text-amber-400"
-                                        >0 piezas</span
-                                    >
-                                </div>
-                                <div class="bg-slate-950 p-3 rounded border border-slate-800">
-                                    <span class="text-slate-400 block text-[10px]">Monto Acumulado a Liquidar</span>
-                                    <span id="stat-monto-liquidar" class="text-lg font-bold text-emerald-400"
-                                        >0.000000 XNO</span
-                                    >
-                                </div>
-                                <div class="bg-slate-950 p-3 rounded border border-slate-800 flex items-center">
-                                    <button
-                                        onclick="ejecutarLiquidacionSimulada()"
-                                        class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 rounded text-xs transition-all">
-                                        ⚡ Ejecutar Liquidación en Red Nano
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="bg-slate-950 p-2.5 rounded border border-slate-800 text-[11px] text-slate-400">
-                                <span class="text-slate-300 font-bold block mb-1">Handshake Nano Wire Status:</span>
-                                <div id="handshake-log" class="text-[10px] space-y-0.5 h-16 overflow-y-auto">
-                                    <div class="text-slate-500">
-                                        [Sistema inicializado. Esperando handshakes con peers...]
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </section>
+                <nanflix-details-panel
+                    class="h-64 border-t border-slate-800 bg-slate-900/80 flex flex-col shrink-0"></nanflix-details-panel>
             </main>
         </div>
-
+        <!-- MENÚ CONTEXTUAL EXTENDIDO -->
         <div
-            id="modal-wallet"
-            class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden flex items-center justify-center p-4 z-50">
-            <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 w-full max-w-md space-y-4 text-xs">
-                <h2 class="text-sm font-bold text-cyan-400 border-b border-slate-800 pb-2 flex items-center justify-between">
-                    <span>🔑 Billetera y Nodo Nano</span>
-                    <span class="text-[10px] text-slate-500 font-normal">Autocustodia Local</span>
-                </h2>
-                
-                <div>
-                    <label class="block text-slate-400 mb-1">Seed Privada (64 hex):</label>
-                    <input
-                        type="password"
-                        id="custody-seed"
-                        placeholder="0000000000000000000000000000000000000000000000000000000000000000"
-                        class="w-full bg-slate-950 border border-slate-800 rounded p-2 text-cyan-300 font-mono focus:border-cyan-500 focus:outline-none" />
-                </div>
+            id="torrent-context-menu"
+            class="fixed hidden bg-slate-900 border border-slate-700/80 rounded-lg shadow-2xl py-1.5 w-60 z-50 text-xs">
+            <!-- Sección Básica -->
+            <button
+                onclick="ejecutarAccionContextMenu('reproducir')"
+                class="w-full text-left px-3 py-1.5 text-slate-200 hover:bg-cyan-950/80 hover:text-cyan-400 flex items-center gap-2 transition-colors">
+                ▶️ Reproducir / Ver Media
+            </button>
+            <button
+                onclick="ejecutarAccionContextMenu('guardar_archivo')"
+                class="w-full text-left px-3 py-1.5 text-slate-200 hover:bg-cyan-950/80 hover:text-cyan-400 flex items-center gap-2 transition-colors">
+                💾 Descargar Archivo Completo
+            </button>
+            <button
+                onclick="ejecutarAccionContextMenu('compartir')"
+                class="w-full text-left px-3 py-1.5 text-slate-200 hover:bg-cyan-950/80 hover:text-cyan-400 flex items-center gap-2 transition-colors">
+                🔗 Copiar Magnet Link
+            </button>
+            <button
+                onclick="ejecutarAccionContextMenu('copiar_infohash')"
+                class="w-full text-left px-3 py-1.5 text-slate-200 hover:bg-cyan-950/80 hover:text-cyan-400 flex items-center gap-2 transition-colors">
+                📋 Copiar Solo InfoHash Hex
+            </button>
 
-                <div>
-                    <label class="block text-slate-400 mb-1">Dirección Pública Derivada (nano_...):</label>
-                    <input
-                        type="text"
-                        id="custody-address"
-                        readonly
-                        placeholder="nano_..."
-                        class="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-400 font-mono" />
-                </div>
+            <div class="border-t border-slate-800 my-1"></div>
 
-                <div class="pt-2 border-t border-slate-800/80 space-y-2">
-                    <label class="block text-slate-400 font-semibold">⚙️ Configuración API Nano Network:</label>
-                    <div>
-                        <label class="block text-slate-500 text-[11px] mb-1">API Key / Token (nano.to / RPC Endpoint):</label>
-                        <input
-                            type="password"
-                            id="nano-api-key"
-                            placeholder="Escribe tu API Key personalizada..."
-                            class="w-full bg-slate-950 border border-slate-800 rounded p-2 text-amber-300 font-mono focus:border-amber-500 focus:outline-none" />
-                    </div>
-                </div>
+            <!-- Sección Control de Red / Seeding -->
+            <button
+                onclick="ejecutarAccionContextMenu('pausar')"
+                class="w-full text-left px-3 py-1.5 text-slate-200 hover:bg-amber-950/80 hover:text-amber-400 flex items-center gap-2 transition-colors">
+                ⏸️ Pausar Seeding
+            </button>
+            <button
+                onclick="ejecutarAccionContextMenu('reanudar')"
+                class="w-full text-left px-3 py-1.5 text-slate-200 hover:bg-emerald-950/80 hover:text-emerald-400 flex items-center gap-2 transition-colors">
+                ▶️ Reanudar Seeding
+            </button>
+            <button
+                onclick="ejecutarAccionContextMenu('reannounce')"
+                class="w-full text-left px-3 py-1.5 text-slate-200 hover:bg-slate-800 hover:text-slate-300 flex items-center gap-2 transition-colors">
+                🔄 Forzar Re-Announce (Trackers)
+            </button>
 
-                <div class="flex gap-2 pt-1">
-                    <button
-                        onclick="generarNuevaSeed()"
-                        class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-2 rounded w-1/2 transition-colors">
-                        🎲 Generar Seed
-                    </button>
-                    <button
-                        onclick="guardarConfiguracionWallet()"
-                        class="bg-cyan-600 hover:bg-cyan-500 text-white font-bold px-3 py-2 rounded w-1/2 transition-colors">
-                        💾 Guardar Cambios
-                    </button>
-                </div>
+            <div class="border-t border-slate-800 my-1"></div>
 
-                <button
-                    onclick="cerrarModal('modal-wallet')"
-                    class="w-full bg-slate-800 hover:bg-slate-700 text-slate-400 py-1.5 rounded transition-colors">
-                    Cerrar
-                </button>
-            </div>
+            <!-- Sección Avanzada & Nano On-Chain -->
+            <button
+                onclick="ejecutarAccionContextMenu('ver_vale_nano')"
+                class="w-full text-left px-3 py-1.5 text-amber-300 hover:bg-amber-950/80 flex items-center gap-2 transition-colors">
+                📜 Ver Vale / Micro-transacciones Nano
+            </button>
+            <button
+                onclick="ejecutarAccionContextMenu('ver_creador')"
+                class="w-full text-left px-3 py-1.5 text-purple-300 hover:bg-purple-950/80 flex items-center gap-2 transition-colors">
+                👤 Ver Billetera de Autor (`nano_...`)
+            </button>
+
+            <div class="border-t border-slate-800 my-1"></div>
+
+            <!-- Eliminar -->
+            <button
+                onclick="ejecutarAccionContextMenu('eliminar')"
+                class="w-full text-left px-3 py-1.5 text-rose-400 hover:bg-rose-950/80 hover:text-rose-300 flex items-center gap-2 transition-colors font-medium">
+                🗑️ Eliminar Torrent
+            </button>
         </div>
-
-        <div
-            id="modal-magnet"
-            class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden flex items-center justify-center p-4 z-50">
-            <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 w-full max-w-md space-y-4 text-xs">
-                <h2 class="text-sm font-bold text-cyan-400 border-b border-slate-800 pb-2">➕ Añadir Magnet Link</h2>
-                <textarea
-                    id="input-magnet-link"
-                    rows="4"
-                    placeholder="magnet:?xt=urn:btih:..."
-                    class="w-full bg-slate-950 border border-slate-800 rounded p-2 font-mono text-cyan-300"></textarea>
-                <div class="flex gap-2">
-                    <button
-                        onclick="procesarMagnetInput()"
-                        class="bg-cyan-600 hover:bg-cyan-500 text-white font-bold px-3 py-2 rounded w-full">
-                        📥 Conectar & Reproducir
-                    </button>
-                </div>
-                <button
-                    onclick="cerrarModal('modal-magnet')"
-                    class="w-full bg-slate-800 hover:bg-slate-700 text-slate-400 py-1.5 rounded">
-                    Cancelar
-                </button>
-            </div>
-        </div>
-
-        <div
-            id="modal-crear"
-            class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden flex items-center justify-center p-4 z-50">
-            <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 w-full max-w-md space-y-4 text-xs">
-                <h2 class="text-sm font-bold text-amber-400 border-b border-slate-800 pb-2">
-                    🚀 Crear y Sembrar Torrent
-                </h2>
-                <div>
-                    <label class="block text-slate-400 mb-1">Seleccionar Video / Audio:</label>
-                    <input type="file" id="input-file-seed" accept="video/*,audio/*" class="w-full text-slate-400" />
-                </div>
-                <button
-                    onclick="crearYSembrarTorrent()"
-                    class="bg-amber-600 hover:bg-amber-500 text-white font-bold px-3 py-2 rounded w-full">
-                    ✨ Generar Magnet y Sembrar
-                </button>
-                <button
-                    onclick="cerrarModal('modal-crear')"
-                    class="w-full bg-slate-800 hover:bg-slate-700 text-slate-400 py-1.5 rounded">
-                    Cancelar
-                </button>
-            </div>
-        </div>
+        <nanflix-modals></nanflix-modals>
+        <script src="ui-buttons.js"></script>
+        <script src="opciones-der.js"></script>
 
         <script src="nano.js"></script>
-        <script src="webtorrent.js"></script>
+        <!-- Módulos de WebTorrent -->
+        <script src="webtorrent/nano-handshake.js"></script>
+        <script src="webtorrent/torrent-control.js"></script>
+
+        <script src="webtorrent/opciones-der.js"></script>
+        <script src="webtorrent/console-logs.js"></script>
         <script src="app.js"></script>
     </body>
 </html>
