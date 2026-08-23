@@ -14,6 +14,7 @@ class NanoExtension {
   onExtendedHandshake(handshake) {
     const myWallet = window.appState?.myWallet || localStorage.getItem("nanflix_wallet");
 
+    // 1. Transmitir nuestra dirección Nano al Peer conectado
     if (myWallet) {
       try {
         console.log(`📤 [Nano Extension] Enviando billetera (${myWallet.substring(0, 14)}...) al Peer: ${this._wire.peerId}`);
@@ -25,8 +26,13 @@ class NanoExtension {
       console.warn("⚠️ [Nano Extension] Billetera propia vacía. No se envió en handshake.");
     }
 
+    // 2. Registrar la billetera remota si viene embebida en el handshake
     if (handshake && handshake.wallet) {
-      window.peerWallets.set(this._wire.peerId, handshake.wallet);
+      const mapPeers = window.peerWallets || peerWallets;
+      if (mapPeers && typeof mapPeers.set === "function") {
+        mapPeers.set(this._wire.peerId, handshake.wallet);
+      }
+
       console.info(`✅ [Nano Handshake Exitoso] Peer: ${this._wire.peerId} -> Wallet: ${handshake.wallet}`);
 
       if (typeof window.registrarHandshakeLog === "function") {
@@ -42,17 +48,24 @@ class NanoExtension {
         const match = strData.match(/nano_[13][13456789abcdefghijkmnopqrstuwxyz]{59}/);
         if (match) {
           const peerWallet = match[0];
-          window.peerWallets.set(this._wire.peerId, peerWallet);
+          const mapPeers = window.peerWallets || peerWallets;
+          if (mapPeers && typeof mapPeers.set === "function") {
+            mapPeers.set(this._wire.peerId, peerWallet);
+          }
           console.info(`✅ [Nano Handshake v2 Exitoso] Peer: ${this._wire.peerId} -> Wallet: ${peerWallet}`);
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      // Ignorar buffers no legibles o binarios de piezas
+    }
   }
 }
 
+// Nombre de registro obligatorio exigido por WebTorrent / bittorrent-protocol
 NanoExtension.prototype.name = "nano_handshake";
 
 function registrarNanoExtension(wire) {
+  if (!wire) return;
   try {
     wire.use(NanoExtension);
   } catch (err) {
@@ -60,4 +73,6 @@ function registrarNanoExtension(wire) {
   }
 }
 
+// Exposición global para acceso desde webtorrent.js y scripts secundarios
+window.NanoExtension = NanoExtension;
 window.registrarNanoExtension = registrarNanoExtension;
