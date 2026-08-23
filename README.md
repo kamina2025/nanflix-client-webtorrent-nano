@@ -29,40 +29,42 @@
 
 ---
 
-#### 📁 Estructura del Proyecto
+## 📁 Estructura del Proyecto
 
 ```text
 .
-├── index.html                  # Interfaz principal (Visor, Creador y Billetera)
-├── app.js                     # Inicialización, UI general y controladores del DOM
-├── nano.js                    # Lógica criptográfica, integración RPC y micropagos Nano
-├── nanocurrency.min.js        # Librería criptográfica para firma cliente-side (ED25519)
-├── opciones-der.js            # Controladores del menú contextual e interfaz
-├── sw.js                      # Service Worker para capacidades PWA y caché offline
-├── manifest.json              # Configuración de aplicación web instalable (PWA)
-├── icon-192.png               # Icono de la aplicación (192x192)
-├── icon-512.png               # Icono de la aplicación (512x512)
-├── LICENSE                    # Licencia de código abierto del proyecto
-├── README.md                  # Documentación principal del proyecto
-├── .gitignore                 # Reglas de exclusión para control de versiones Git
-├── .gitattributes             # Configuración de atributos de repositorio Git
+│   .gitattributes
+│   .gitignore
+│   app.js                  # Orquestador general de la UI y eventos globales
+│   icon-192.png
+│   icon-512.png
+│   index.html              # Interfaz principal de la aplicación
+│   LICENSE
+│   manifest.json           # Configuración PWA
+│   nano.js                 # Lógica criptográfica y gestión de billeteras
+│   nanocurrency.min.js     # Librería para operaciones criptográficas Nano
+│   opciones-der.js         # Controladores para menú contextual y modal flotante
+│   README.md               # Documentación del proyecto
+│   sw.js                   # Service Worker PWA
+│   ui-buttons.js           # Manejadores de eventos e interacción de botones
 │
-├───components                 # Módulos UI reusables y desacoplados
-│   ├── details-panel.js       # Panel informativo de metadatos y estado del torrent
-│   ├── header-bar.js          # Barra superior de navegación y estado de billetera
-│   ├── modals-container.js    # Contenedor dinámico para ventanas modales (pagos, wallet)
-│   ├── sidebar-filters.js     # Filtros laterales de búsqueda y navegación
-│   └── torrents-table.js      # Tabla interactiva para la lista de torrents activos
+├───components
+│       details-panel.js    # Panel inferior de detalles, reproductor y liquidaciones
+│       header-bar.js       # Barra superior de navegación y estado de billetera
+│       modals-container.js # Contenedor de modales (creación, conexión magnet, etc.)
+│       peerwallets.js      # Pestaña/componente de peers conectados y piezas compartidas
+│       sidebar-filters.js    # Menú lateral para filtrado de torrents
+│       torrents-table.js   # Tabla con columnas independientes de gastos/ganancias
 │
-├───webtorrent                 # Lógica P2P y extensión del protocolo Wire
-│   ├── console-logs.js        # Registros de consola y monitoreo de eventos P2P
-│   ├── nano-handshake.js      # Extensión BEP-10 para intercambio P2P de billeteras Nano
-│   ├── opciones-der.js        # Manejador de eventos secundarios para el reproductor P2P
-│   └── torrent-control.js     # Controlador del cliente WebTorrent, gestor de enjambre y piezas
+├───utilizados
+│       creador.html        # Plantilla/prototipo preliminar de vista creador
+│       espectador.html     # Plantilla/prototipo preliminar de vista espectador
+│       imagen.webp
+│       imagen2.webp
+│       webtorrent.js       # Script bundle base WebTorrent
 │
-└───utilizados                 # Prototipos base, vistas aisladas y artefactos de prueba
-    ├── creador.html           # Prototipo para generación y siembra de torrents
-    ├── espectador.html        # Prototipo del visor P2P con liquidación de micropagos
-    ├── imagen.webp            # Recurso gráfico para pruebas de interfaz
-    ├── imagen2.webp           # Recurso gráfico secundario de prueba
-    └── webtorrent.js          # Build del cliente WebTorrent para navegador
+└───webtorrent
+        console-logs.js     # Herramientas de depuración y logs de consola (NanFlixDebug)
+        nano-handshake.js   # Extensión de protocolo Wire BEP 10 para Nano
+        opciones-der.js     # Acciones contextuales sobre torrents (copiar, eliminar, reproducir)
+        torrent-control.js  # Gestión del motor WebTorrent (conectar, sembrar, pausar, eliminar)
