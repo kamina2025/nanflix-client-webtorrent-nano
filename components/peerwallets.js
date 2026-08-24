@@ -1,38 +1,7 @@
 // ============================================================
-// COMPONENTE / UI: CONTROL DE PESTAÑAS Y TABLA DE PEERS
+// COMPONENTE / UI: TABLA DE PEERS (PEERWALLETS.JS)
 // ============================================================
 
-/**
- * Controla la navegación entre pestañas dentro de <nanflix-details-panel>
- * @param {string} tab - ID de la pestaña ('reproductor' | 'liquidaciones' | 'peers')
- */
-function cambiarTabDetalle(tab) {
-  const tabs = ['reproductor', 'liquidaciones', 'peers'];
-
-  tabs.forEach((t) => {
-    const btn = document.getElementById(`tab-btn-${t}`);
-    const content = document.getElementById(`tab-content-${t}`);
-
-    if (t === tab) {
-      btn?.classList.add('border-b-2', 'border-cyan-500', 'text-cyan-400');
-      btn?.classList.remove('text-slate-400');
-      content?.classList.remove('hidden');
-    } else {
-      btn?.classList.remove('border-b-2', 'border-cyan-500', 'text-cyan-400');
-      btn?.classList.add('text-slate-400');
-      content?.classList.add('hidden');
-    }
-  });
-
-  // Al seleccionar la pestaña de peers, actualizamos la tabla con la DB en memoria
-  if (tab === 'peers') {
-    renderizarTablaPeers();
-  }
-}
-
-/**
- * Lee la base de datos en memoria (window.peerWallets) e inyecta las filas en la tabla HTML
- */
 /**
  * Lee el Map global window.peerWallets y renderiza las filas e indicadores de piezas en la tabla HTML
  */
@@ -50,7 +19,6 @@ function renderizarTablaPeers() {
 
   let html = '';
   window.peerWallets.forEach((val, peerKey) => {
-    // Manejo de compatibilidad (si val es un string de wallet o un objeto estructurado)
     const wallet = typeof val === 'object' ? val.wallet : val;
     const piezas = typeof val === 'object' ? (val.piezas || 0).toFixed(2) : '0.00';
 
@@ -65,6 +33,5 @@ function renderizarTablaPeers() {
   tbody.innerHTML = html;
 }
 
-// Exportación global para eventos inline (onclick)
-window.cambiarTabDetalle = cambiarTabDetalle;
+// Exportación global exclusiva
 window.renderizarTablaPeers = renderizarTablaPeers;

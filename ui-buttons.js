@@ -47,27 +47,33 @@ function switchTab(tab) {
     }
 }
 
-// 3. Control de Pestañas del Panel de Detalles (Reproductor vs Liquidaciones)
+// 3. Control de Pestañas del Panel de Detalles (Reproductor vs Liquidaciones vs Peers)
 function cambiarTabDetalle(tab) {
-    const tabRep = document.getElementById("tab-content-reproductor");
-    const tabLiq = document.getElementById("tab-content-liquidaciones");
-    
-    if (tabRep) tabRep.classList.toggle("hidden", tab !== 'reproductor');
-    if (tabLiq) tabLiq.classList.toggle("hidden", tab !== 'liquidaciones');
-    
-    const btnRep = document.getElementById("tab-btn-reproductor");
-    const btnLiq = document.getElementById("tab-btn-liquidaciones");
+    const tabs = ['reproductor', 'liquidaciones', 'peers'];
 
-    if (btnRep) {
-        btnRep.className = tab === 'reproductor' 
-            ? "px-4 py-2 font-semibold border-b-2 border-cyan-500 text-cyan-400" 
-            : "px-4 py-2 font-semibold text-slate-400 hover:text-slate-200";
+    tabs.forEach((t) => {
+        const btn = document.getElementById(`tab-btn-${t}`);
+        const content = document.getElementById(`tab-content-${t}`);
+
+        if (t === tab) {
+            btn?.classList.add('border-b-2', 'border-cyan-500', 'text-cyan-400');
+            btn?.classList.remove('text-slate-400');
+            content?.classList.remove('hidden');
+        } else {
+            btn?.classList.remove('border-b-2', 'border-cyan-500', 'text-cyan-400');
+            btn?.classList.add('text-slate-400');
+            content?.classList.add('hidden');
+        }
+    });
+
+    // ⚡ ACCIÓN 1: Al seleccionar la pestaña de liquidaciones, sincronizar acumulados XNO
+    if (tab === 'liquidaciones' && typeof window.actualizarMetricasLiquidacion === 'function') {
+        window.actualizarMetricasLiquidacion();
     }
 
-    if (btnLiq) {
-        btnLiq.className = tab === 'liquidaciones' 
-            ? "px-4 py-2 font-semibold border-b-2 border-cyan-500 text-cyan-400" 
-            : "px-4 py-2 font-semibold text-slate-400 hover:text-slate-200";
+    // ⚡ ACCIÓN 2: Al seleccionar la pestaña de peers, renderizar tabla P2P
+    if (tab === 'peers' && typeof window.renderizarTablaPeers === 'function') {
+        window.renderizarTablaPeers();
     }
 }
 
