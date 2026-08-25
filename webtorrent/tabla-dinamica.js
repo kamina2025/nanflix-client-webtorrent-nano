@@ -58,15 +58,17 @@ function actualizarFilaTabla(torrent, esCreador = false) {
   const progreso = torrent.progress || 0;
   const esCompletado = progreso === 1 || esCreador;
 
+  // 1. Métricas de red
   if (progEl) progEl.innerText = esCompletado ? "100.0%" : `${(progreso * 100).toFixed(1)}%`;
   if (peersEl) peersEl.innerText = torrent.numPeers || 0;
   if (downSpeedEl) downSpeedEl.innerText = `${((torrent.downloadSpeed || 0) / 1024).toFixed(1)} KB/s`;
   if (upSpeedEl) upSpeedEl.innerText = `${((torrent.uploadSpeed || 0) / 1024).toFixed(1)} KB/s`;
 
-  // Asegurar acceso a la base de datos modularizada
+  // Base de datos de persistencia local
   const db = (typeof window.obtenerBDTorrents === "function") ? window.obtenerBDTorrents() : {};
   const datosHistoricos = db[torrent.infoHash] || { gastoTotal: 0, gananciaTotal: 0 };
 
+  // 2. Previsualización P2P por Pieza (Gasto vs Ganancia por pieza)
   if (esCreador) {
     if (costPieceEl) costPieceEl.innerText = "0.000000 XNO"; 
     if (profitPieceEl) profitPieceEl.innerText = `${datosHistoricos.gananciaTotal.toFixed(6)} XNO`;
@@ -96,13 +98,18 @@ function actualizarFilaTabla(torrent, esCreador = false) {
     }
   }
 
-  const gananciasCalcular = (window.appState && window.appState.montoAcumulado) ? window.appState.montoAcumulado : datosHistoricos.gananciaTotal;
-  if (earnEl) earnEl.innerText = `${gananciasCalcular.toFixed(6)} XNO`;
+  // 3. Ganancias Estimadas: Refleja ÚNICAMENTE el saldo ingresado por liquidaciones On-Chain recibidas
+  const gananciasLiquidadas = (window.appState && typeof window.appState.gananciasConfirmadas === 'number')
+    ? window.appState.gananciasConfirmadas
+    : 0;
+  if (earnEl) earnEl.innerText = `${gananciasLiquidadas.toFixed(6)} XNO`;
 
-  const saldoActual = (window.appState && window.appState.saldoWallet) ? window.appState.saldoWallet : 0;
+  // 4. Saldo Real de Billetera
+  const saldoActual = (window.appState && typeof window.appState.saldoWallet === 'number')
+    ? window.appState.saldoWallet
+    : 0;
   if (balanceEl) balanceEl.innerText = `${saldoActual.toFixed(6)} XNO`;
 }
-
 // Exposición global
 window.agregarFilaTabla = agregarFilaTabla;
 window.actualizarFilaTabla = actualizarFilaTabla;
