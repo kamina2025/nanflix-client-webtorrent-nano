@@ -38,7 +38,6 @@ async function enviarMicropagoReal(destinatario, montoXNO) {
   const currentSeed = window.appState?.custodySeed || localStorage.getItem("nanflix_seed");
   const currentWallet = window.appState?.myWallet || localStorage.getItem("nanflix_wallet");
 
-  // Sanitizar parámetro de entrada
   destinatario = String(destinatario || "").trim();
 
   if (!currentSeed) {
@@ -60,7 +59,6 @@ async function enviarMicropagoReal(destinatario, montoXNO) {
   try {
     console.log(`🔄 [Nano RPC] Consultando estado de la cuenta origen: ${currentWallet}...`);
 
-    // 1. Información de la cuenta origen
     const accountInfo = await nanoRPC("account_info", {
       account: currentWallet,
       representative: true
@@ -70,7 +68,6 @@ async function enviarMicropagoReal(destinatario, montoXNO) {
       throw new Error(`Error en nodo RPC: ${accountInfo.error}. Si la cuenta es nueva, debe recibir un depósito primero.`);
     }
 
-    // 2. Obtener Clave Privada desde la semilla (Seed Hex de 64 o 128 caracteres)
     let privateKey = "";
     if (currentSeed.length === 64) {
       if (typeof NanoLib.wallet?.fromLegacySeed === "function") {
@@ -88,7 +85,6 @@ async function enviarMicropagoReal(destinatario, montoXNO) {
       throw new Error("No se pudo obtener la clave privada desde la semilla actual.");
     }
 
-    // 3. Conversión de monto y validación de saldo
     const rawAmount = NanoLib.tools 
       ? NanoLib.tools.convert(montoXNO.toString(), "NANO", "RAW") 
       : (BigInt(Math.floor(montoXNO * 1e30))).toString();
@@ -103,7 +99,6 @@ async function enviarMicropagoReal(destinatario, montoXNO) {
       throw new Error(`Saldo insuficiente. Tienes ${balanceNANO} XNO y necesitas ${montoXNO} XNO.`);
     }
 
-    // 4. Generación de PoW
     console.log("⚙️ [Nano RPC] Generando PoW para el bloque send...");
     const workResponse = await nanoRPC("work_generate", { hash: accountInfo.frontier });
 
@@ -111,7 +106,6 @@ async function enviarMicropagoReal(destinatario, montoXNO) {
       throw new Error("No se pudo generar el PoW a través del nodo RPC.");
     }
 
-    // 5. Construir y firmar el bloque state send
     console.log("🔑 Firmando bloque de transacción localmente...");
     let signedBlock = null;
 
@@ -132,7 +126,6 @@ async function enviarMicropagoReal(destinatario, montoXNO) {
       throw new Error("El método para firmar bloques no está soportado por la librería cargada.");
     }
 
-    // 6. Publicación del bloque a la red principal
     console.log("🚀 Transmitiendo transacción On-Chain a la red Nano...");
     const processResponse = await nanoRPC("process", {
       json_block: "true",
@@ -162,16 +155,12 @@ async function enviarMicropagoReal(destinatario, montoXNO) {
 // TRANSACCIONES ON-CHAIN Y LIQUIDACIÓN DE RED NANO
 // ============================================================
 
-/**
- * Ejecuta la liquidación real On-Chain tomando las ganancias del appState
- */
 async function ejecutarLiquidacionOnChain() {
   if (!window.appState || (window.appState.montoAcumulado || 0) <= 0) {
     alert("No hay fondos acumulados para liquidar.");
     return;
   }
 
-  // Extraer la billetera del peer conectado asegurando una cadena de texto válida
   const peerMap = window.peerWallets || new Map();
   let destinatario = "";
 
@@ -184,7 +173,6 @@ async function ejecutarLiquidacionOnChain() {
     }
   }
 
-  // Fallback a una dirección válida en caso de no existir peers
   if (!destinatario || typeof destinatario !== "string" || !destinatario.startsWith("nano_")) {
     destinatario = "nano_1111111111111111111111111111111111111111111111111111h4s31496";
   }
@@ -197,11 +185,24 @@ async function ejecutarLiquidacionOnChain() {
       const resultado = await window.enviarMicropagoReal(destinatario, montoFormateado);
 
       if (resultado && resultado.hash) {
-        // Actualización contable tras confirmación en blockchain
-        window.appState.saldoWallet = Math.max(0, (window.appState.saldoWallet || 0) - montoLiquidar);
-        window.appState.montoAcumulado = 0;
+        // C) Si existe una conexión P2P activa, notificar al receptor mediante la extensión de alambre (wire)
+        if (window.wtClient && window.wtClient.torrents) {
+          window.wtClient.torrents.forEach(t => {
+            if (t.wires) {
+              t.wires.forEach(wire => {
+                if (typeof wire.extended === "function") {
+                  wire.extended("nano_payment", JSON.stringify({
+                    hash: resultado.hash,
+                    monto: montoLiquidar,
+                    destinatario:destinatario
+                  }));
+                }
+              });
+            }
+          });
+        }
 
-        // Refrescar métricas en pantalla
+        // D) Refrescar la interfaz y actualizar la tabla
         if (typeof window.actualizarMetricasLiquidacion === "function") {
           window.actualizarMetricasLiquidacion();
         }
@@ -223,8 +224,7 @@ async function ejecutarLiquidacionOnChain() {
     alert(`Error en producción On-Chain: ${error.message}`);
   }
 }
-
-// Exposición Global (Removida cualquier referencia explícita a funciones simuladas)
+// Exposición Global
 window.nanoRPC = nanoRPC;
 window.enviarMicropagoReal = enviarMicropagoReal;
 window.ejecutarLiquidacionOnChain = ejecutarLiquidacionOnChain;
