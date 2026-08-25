@@ -96,61 +96,60 @@ function conectarTorrent(magnetURI) {
   });
 
   // ============================================================
-// MANEJO DE EVENTOS WIRE P2P (DESCARGA Y SUBIDA)
-// ============================================================
-torrent.on("wire", (wire) => {
-  if (typeof window.registrarNanoExtension === "function") {
-    window.registrarNanoExtension(wire);
-  }
-
-  // 1. EVENTO DESCARGA: Se dispara cuando el cliente recibe piezas (Leecher)
-  wire.on("download", (bytes) => {
-    const pieceLength = torrent.pieceLength || 16384;
-    const piezas = bytes / pieceLength;
-    const costoDescarga = piezas * PRICE_PER_PIECE;
-
-    if (window.appState) {
-      // Incrementar el contador de piezas
-      window.appState.piezasServidasTotal = (window.appState.piezasServidasTotal || 0) + piezas;
-      
-      // ⚡ ASIGNACIÓN CLAVE: Acumular el monto a liquidar en el appState global
-      window.appState.montoAcumulado = (window.appState.montoAcumulado || 0) + costoDescarga;
+  // MANEJO DE EVENTOS WIRE P2P (DESCARGA Y SUBIDA)
+  // ============================================================
+  torrent.on("wire", (wire) => {
+    if (typeof window.registrarNanoExtension === "function") {
+      window.registrarNanoExtension(wire);
     }
 
-    // Registrar en BD local si aplica
-    if (typeof window.registrarTransaccionP2P === "function") {
-      window.registrarTransaccionP2P(torrent.infoHash, "download", piezas);
-    }
+    // 1. EVENTO DESCARGA: Se dispara cuando el cliente recibe piezas (Leecher)
+    wire.on("download", (bytes) => {
+      const pieceLength = torrent.pieceLength || 16384;
+      const piezas = bytes / pieceLength;
+      const costoDescarga = piezas * PRICE_PER_PIECE;
 
-    // Refrescar inmediatamente el DOM de la pestaña de Liquidaciones y la Tabla
-    if (typeof window.actualizarMetricasLiquidacion === "function") {
-      window.actualizarMetricasLiquidacion();
-    }
-    if (typeof window.actualizarFilaTabla === "function") {
-      window.actualizarFilaTabla(torrent, false);
-    }
+      if (window.appState) {
+        window.appState.piezasServidasTotal = (window.appState.piezasServidasTotal || 0) + piezas;
+        window.appState.montoAcumulado = (window.appState.montoAcumulado || 0) + costoDescarga;
+      }
+
+      if (typeof window.registrarTransaccionP2P === "function") {
+        window.registrarTransaccionP2P(torrent.infoHash, "download", piezas);
+      }
+
+      if (typeof window.actualizarMetricasLiquidacion === "function") {
+        window.actualizarMetricasLiquidacion();
+      }
+      if (typeof window.actualizarFilaTabla === "function") {
+        window.actualizarFilaTabla(torrent, torrent.progress === 1);
+      }
+    });
+
+    // 2. EVENTO SUBIDA: Se dispara cuando el cliente entrega piezas (Seeder)
+    wire.on("upload", (bytes) => {
+      const pieceLength = torrent.pieceLength || 16384;
+      const piezas = bytes / pieceLength;
+
+      if (typeof window.registrarTransaccionP2P === "function") {
+        window.registrarTransaccionP2P(torrent.infoHash, "upload", piezas);
+      }
+
+      const peerId = wire.peerId || wire.remoteAddress || `peer_${Math.random().toString(36).substring(2, 7)}`;
+      registrarActividadPeer(peerId, piezas);
+
+      //if (window.appState) {
+        //window.appState.piezasServidasTotal = (window.appState.piezasServidasTotal || 0) + piezas;
+      //}
+
+      if (typeof window.actualizarMetricasLiquidacion === "function") {
+        window.actualizarMetricasLiquidacion();
+      }
+      if (typeof window.actualizarFilaTabla === "function") {
+        window.actualizarFilaTabla(torrent, true);
+      }
+    });
   });
-
-  // 2. EVENTO SUBIDA: Se dispara cuando el cliente entrega piezas (Seeder)
-  wire.on("upload", (bytes) => {
-    const pieceLength = torrent.pieceLength || 16384;
-    const piezas = bytes / pieceLength;
-    const gananciaSiembra = piezas * PRICE_PER_PIECE * 0.6; // 60% por pieza compartida
-
-    if (window.appState) {
-      window.appState.piezasServidasTotal = (window.appState.piezasServidasTotal || 0) + piezas;
-      window.appState.montoAcumulado = (window.appState.montoAcumulado || 0) + gananciaSiembra;
-    }
-
-    if (typeof window.registrarTransaccionP2P === "function") {
-      window.registrarTransaccionP2P(torrent.infoHash, "upload", piezas);
-    }
-
-    if (typeof window.actualizarFilaTabla === "function") {
-      window.actualizarFilaTabla(torrent, true);
-    }
-  });
-});
 
   torrent.on("done", () => {
     console.info(`🎉 [Torrent Completado] InfoHash: ${torrent.infoHash}. Cambiando a estado Seeding.`);
@@ -211,17 +210,16 @@ function crearYSembrarTorrent() {
         const pieceLength = torrent.pieceLength || 16384;
         const piezas = bytes / pieceLength;
 
-        let datosTorrent = { gananciaTotal: 0 };
         if (typeof window.registrarTransaccionP2P === "function") {
-          datosTorrent = window.registrarTransaccionP2P(torrent.infoHash, "upload", piezas);
+          window.registrarTransaccionP2P(torrent.infoHash, "upload", piezas);
         }
         registrarActividadPeer(peerId, piezas);
 
-        if (window.appState) {
-          window.appState.piezasServidasTotal = (window.appState.piezasServidasTotal || 0) + piezas;
-          window.appState.montoAcumulado = datosTorrent.gananciaTotal;
-        }
+       // if (window.appState) {
+         // window.appState.piezasServidasTotal = (window.appState.piezasServidasTotal || 0) + piezas;
+        //}
 
+        if (typeof window.actualizarMetricasLiquidacion === "function") window.actualizarMetricasLiquidacion();
         if (typeof window.actualizarFilaTabla === "function") window.actualizarFilaTabla(torrent, true);
       });
     });
