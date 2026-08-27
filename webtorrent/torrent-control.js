@@ -58,30 +58,29 @@ function conectarTorrent(magnetURI) {
     return;
   }
 
-  try {
-    const urlParams = new URLSearchParams(magnetURI.replace(/^magnet:\?/, ""));
-    const creatorWallet = urlParams.get("xl")
-      ? urlParams.get("xl").includes("creator_wallet=")
-        ? urlParams.get("xl").split("creator_wallet=")[1]
-        : null
-      : urlParams.get("creator");
+  // torrent-control.js
+try {
+  const urlParams = new URLSearchParams(magnetURI.replace(/^magnet:\?/, ""));
+  const creatorWallet = urlParams.get("xl")
+    ? urlParams.get("xl").includes("creator_wallet=")
+      ? urlParams.get("xl").split("creator_wallet=")[1]
+      : null
+    : urlParams.get("creator");
 
-    if (creatorWallet) {
-      const keyCreator = `creator_${magnetURI.substring(0, 20)}`;
-      const datosPrevios = peerWallets.get(keyCreator);
-      const piezasPrevias = typeof datosPrevios === "object" ? datosPrevios.piezas : 0;
-      
-      peerWallets.set(keyCreator, {
-        wallet: creatorWallet,
-        piezas: piezasPrevias
-      });
+  if (creatorWallet && window.validarDireccionNano(creatorWallet)) {
+    // Extraer el InfoHash real de 40 caracteres hex de la URI
+    const matchHash = magnetURI.match(/btih:([a-fA-F0-9]{40})/i);
+    const infoHashTarget = matchHash ? matchHash[1].toLowerCase() : null;
 
-      console.log(`👤 [Magnet Metadatos] Billetera del creador detectada: ${creatorWallet}`);
-      if (typeof window.renderizarTablaPeers === "function") window.renderizarTablaPeers();
+    if (infoHashTarget) {
+      // Registrar la billetera vinculada exactamente al InfoHash
+      window.registrarWalletPeer(infoHashTarget, "creator", creatorWallet);
+      console.log(`👤 [Magnet Metadatos] Billetera del creador vinculada al InfoHash ${infoHashTarget}: ${creatorWallet}`);
     }
-  } catch (err) {
-    console.warn("⚠️ Error extrayendo parámetros adicionales del Magnet Link:", err);
   }
+} catch (err) {
+  console.warn("⚠️ Error extrayendo parámetros adicionales del Magnet Link:", err);
+}
 
   const torrent = wtClient.add(magnetURI, { announce: STABLE_TRACKERS });
   console.log(`⏳ [Torrent Agregado] InfoHash: ${torrent.infoHash}`);

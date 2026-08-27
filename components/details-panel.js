@@ -1,14 +1,18 @@
+// ============================================================
+// COMPONENTE: WEB COMPONENT DEL PANEL DE DETALLES
+// ============================================================
+
 class NanflixDetailsPanel extends HTMLElement {
-    connectedCallback() {
-        this.innerHTML = `
+  connectedCallback() {
+    this.innerHTML = `
         <div class="flex border-b border-slate-800 bg-slate-950 text-xs">
-            <button onclick="cambiarTabDetalle('reproductor')" id="tab-btn-reproductor" class="px-4 py-2 font-semibold border-b-2 border-cyan-500 text-cyan-400">
+            <button id="tab-btn-reproductor" class="px-4 py-2 font-semibold border-b-2 border-cyan-500 text-cyan-400">
                 🎥 Reproductor & Streaming
             </button>
-            <button onclick="cambiarTabDetalle('liquidaciones')" id="tab-btn-liquidaciones" class="px-4 py-2 font-semibold text-slate-400 hover:text-slate-200">
+            <button id="tab-btn-liquidaciones" class="px-4 py-2 font-semibold text-slate-400 hover:text-slate-200">
                 💎 Liquidación y Handshake Nano
             </button>
-            <button onclick="cambiarTabDetalle('peers')" id="tab-btn-peers" class="px-4 py-2 font-semibold text-slate-400 hover:text-slate-200">
+            <button id="tab-btn-peers" class="px-4 py-2 font-semibold text-slate-400 hover:text-slate-200">
                 🔍 Peers & Billeteras
             </button>
         </div>
@@ -32,7 +36,7 @@ class NanflixDetailsPanel extends HTMLElement {
                         <span id="stat-monto-liquidar" class="text-lg font-bold text-emerald-400">0.000000 XNO</span>
                     </div>
                     <div class="bg-slate-950 p-3 rounded border border-slate-800 flex items-center">
-                        <button onclick="ejecutarLiquidacionOnChain()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded text-xs transition-all shadow-md active:scale-95">
+                        <button id="btn-ejecutar-liquidacion" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded text-xs transition-all shadow-md active:scale-95">
                             ⚡ Ejecutar Liquidación en Red Nano Real
                         </button>
                     </div>
@@ -52,7 +56,7 @@ class NanflixDetailsPanel extends HTMLElement {
                         <span class="text-slate-200 font-bold block">Base de Datos en Memoria (peerWallets)</span>
                         <span class="text-slate-500 text-[10px]">Monitoreo de peers activos, piezas entregadas y direcciones Nano</span>
                     </div>
-                    <button onclick="renderizarTablaPeers()" class="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-[11px] border border-slate-700 transition-all">
+                    <button id="btn-recargar-peers" class="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-[11px] border border-slate-700 transition-all">
                         🔄 Recargar DB
                     </button>
                 </div>
@@ -76,8 +80,29 @@ class NanflixDetailsPanel extends HTMLElement {
                     </div>
                 </div>
             </div>
-            
         </div>`;
-    }
+
+    // Asignación de event listeners limpios (Compatibles con CSP estricto)
+    this.querySelector('#tab-btn-reproductor')?.addEventListener('click', () => {
+      if (typeof window.cambiarTabDetalle === 'function') window.cambiarTabDetalle('reproductor');
+    });
+
+    this.querySelector('#tab-btn-liquidaciones')?.addEventListener('click', () => {
+      if (typeof window.cambiarTabDetalle === 'function') window.cambiarTabDetalle('liquidaciones');
+    });
+
+    this.querySelector('#tab-btn-peers')?.addEventListener('click', () => {
+      if (typeof window.cambiarTabDetalle === 'function') window.cambiarTabDetalle('peers');
+    });
+
+    this.querySelector('#btn-ejecutar-liquidacion')?.addEventListener('click', () => {
+      if (typeof window.ejecutarLiquidacionOnChain === 'function') window.ejecutarLiquidacionOnChain();
+    });
+
+    this.querySelector('#btn-recargar-peers')?.addEventListener('click', () => {
+      if (typeof window.renderizarTablaPeers === 'function') window.renderizarTablaPeers();
+    });
+  }
 }
+
 customElements.define("nanflix-details-panel", NanflixDetailsPanel);

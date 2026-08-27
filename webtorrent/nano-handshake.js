@@ -69,39 +69,65 @@ function registrarNanoExtension(wire) {
 
         const data = JSON.parse(matchJSON[0]);
 
-        if (data && data.monto) {
-          const montoRecibido = parseFloat(data.monto);
-          const myWallet = window.appState?.myWallet || localStorage.getItem("nanflix_wallet");
+        // nano-handshake.js (Hoy - Sanitización Estricta)
+       // Solución aplicada en nano-handshake.js
+if (data && data.monto) {
+  const montoRecibido = parseFloat(data.monto);
+  
+  // Sanitización estricta en minúsculas
+  const myWallet = String(window.appState?.myWallet || localStorage.getItem("nanflix_wallet") || "").toLowerCase().trim();
+  const destinatarioPago = String(data.destinatario || "").toLowerCase().trim();
 
-          // ⚡ FIX: Solo abonar si este cliente es el verdadero destinatario del pago
-          if (data.destinatario && data.destinatario === myWallet) {
-            console.log(
-              `💰 ¡Pago On-Chain Confirmado a tu favor! Hash: ${data.hash || "N/A"}, Monto: ${montoRecibido} XNO`
-            );
+  // Comparación inmune a diferencias de caja (case-insensitive)
+  if (destinatarioPago && destinatarioPago === myWallet) {
+    console.log(`💰 ¡Pago On-Chain Confirmado a tu favor! Hash: ${data.hash || "N/A"}, Monto: ${montoRecibido} XNO`);
 
-            window.appState.gananciasConfirmadas = (window.appState.gananciasConfirmadas || 0) + montoRecibido;
-            window.appState.saldoWallet = (window.appState.saldoWallet || 0) + montoRecibido;
-          } else {
-            console.log(
-              `ℹ️ [Gossip P2P] Notificación de pago entre otros pares procesada (Hash: ${data.hash || "N/A"})`
-            );
-          }
+    window.appState.gananciasConfirmadas = (window.appState.gananciasConfirmadas || 0) + montoRecibido;
+    window.appState.saldoWallet = (window.appState.saldoWallet || 0) + montoRecibido;
+  } else {
+    console.log(`ℹ️ [Gossip P2P] Notificación de pago entre otros pares procesada (Hash: ${data.hash || "N/A"})`);
+  }
 
-          // Refrescar filas de la tabla
-          if (window.wtClient && window.wtClient.torrents) {
-            window.wtClient.torrents.forEach((t) => {
-              if (typeof window.actualizarFilaTabla === "function") {
-                window.actualizarFilaTabla(t, t.progress === 1 || t.uploaded > 0);
-              }
-            });
-          }
-        }
+  // Refrescar filas de la tabla dinámicamente
+  if (window.wtClient && window.wtClient.torrents) {
+    window.wtClient.torrents.forEach((t) => {
+      if (typeof window.actualizarFilaTabla === "function") {
+        window.actualizarFilaTabla(t, t.progress === 1 || t.uploaded > 0);
+      }
+    });
+  }
+}
       } catch (e) {
         console.error("❌ Error al decodificar notificación de pago Nano:", e);
       }
     }
   });
 }
+
+// Mapa aislado: infoHash -> Map(peerId -> { wallet, piezas, nonce })
+const torrentPeerWallets = new Map();
+
+function registrarWalletPeer(infoHash, peerId, wallet, piezas = 0) {
+  if (typeof window.validarDireccionNano === "function" && !window.validarDireccionNano(wallet)) {
+    console.warn(`⚠️ Billetera Nano inválida rechazada (${peerId}):`, wallet);
+    return;
+  }
+
+  if (!torrentPeerWallets.has(infoHash)) {
+    torrentPeerWallets.set(infoHash, new Map());
+  }
+
+  const mapaTorrent = torrentPeerWallets.get(infoHash);
+  mapaTorrent.set(peerId, { wallet, piezas });
+
+  // Sincronizar UI de forma segura
+  if (typeof window.renderizarTablaPeers === "function") {
+    window.renderizarTablaPeers();
+  }
+}
+
+window.torrentPeerWallets = torrentPeerWallets;
+window.registrarWalletPeer = registrarWalletPeer;
 
 // Exposición global
 window.NanoHandshakeExtension = NanoHandshakeExtension;

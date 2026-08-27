@@ -47,7 +47,7 @@ function switchTab(tab) {
     }
 }
 
-// 3. Control de Pestañas del Panel de Detalles (Reproductor vs Liquidaciones vs Peers)
+// 3. Control de Pestañas del Panel de Detalles
 function cambiarTabDetalle(tab) {
     const tabs = ['reproductor', 'liquidaciones', 'peers'];
 
@@ -66,12 +66,10 @@ function cambiarTabDetalle(tab) {
         }
     });
 
-    // ⚡ ACCIÓN 1: Al seleccionar la pestaña de liquidaciones, sincronizar acumulados XNO
     if (tab === 'liquidaciones' && typeof window.actualizarMetricasLiquidacion === 'function') {
         window.actualizarMetricasLiquidacion();
     }
 
-    // ⚡ ACCIÓN 2: Al seleccionar la pestaña de peers, renderizar tabla P2P
     if (tab === 'peers' && typeof window.renderizarTablaPeers === 'function') {
         window.renderizarTablaPeers();
     }
@@ -81,7 +79,6 @@ function cambiarTabDetalle(tab) {
 function filtrarTorrents(criterio) {
     const filtros = ["todos", "descargando", "sembrando", "pausados"];
     
-    // Actualizar estilo visual de los botones de filtro
     filtros.forEach((f) => {
         const btn = document.getElementById(`btn-filtro-${f}`);
         if (btn) {
@@ -91,13 +88,13 @@ function filtrarTorrents(criterio) {
         }
     });
 
-    // Filtrar filas de la tabla de torrents
     const filas = document.querySelectorAll("#torrents-table-body tr, #tabla-torrents-body tr");
     filas.forEach((fila) => {
         if (criterio === "todos") {
             fila.classList.remove("hidden");
         } else {
-            const estado = fila.getAttribute("data-estado") || fila.innerText.toLowerCase();
+            // Se prioriza la lectura del atributo data-estado
+            const estado = (fila.getAttribute("data-estado") || "").toLowerCase();
             if (estado.includes(criterio)) {
                 fila.classList.remove("hidden");
             } else {
@@ -127,7 +124,7 @@ function procesarMagnetInput() {
         if (typeof window.conectarTorrent === "function") {
             window.conectarTorrent(magnet);
         } else {
-            console.error("La función 'conectarTorrent' no está cargada en webtorrent.js.");
+            console.error("La función 'conectarTorrent' no está cargada.");
         }
         cerrarModal("modal-magnet");
         if (input) input.value = "";
@@ -136,9 +133,7 @@ function procesarMagnetInput() {
     }
 }
 
-// ============================================================
-// EXPOSICIÓN GLOBAL EN WINDOW (Para eventos inline onclick)
-// ============================================================
+// Exposición global
 window.abrirModal = abrirModal;
 window.cerrarModal = cerrarModal;
 window.switchTab = switchTab;

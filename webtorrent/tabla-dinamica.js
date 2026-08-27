@@ -21,9 +21,10 @@ function agregarFilaTabla(torrent, esCreador = false) {
 
   const saldoActualWallet = (window.appState?.saldoWallet || 0).toFixed(6);
 
+  // 1. Crear estructura fija HTML de celdas
   tr.innerHTML = `
     <td class="p-2.5 font-semibold ${esCreador ? 'text-amber-400' : 'text-emerald-400'}" id="status-${torrent.infoHash}">${esCreador ? 'Sembrando' : 'Descargando'}</td>
-    <td class="p-2.5 font-sans font-medium text-slate-100 truncate">${torrent.name || torrent.infoHash.substring(0, 12)}</td>
+    <td class="p-2.5 font-sans font-medium text-slate-100 truncate" id="name-${torrent.infoHash}"></td>
     <td class="p-2.5" id="prog-${torrent.infoHash}">${esCreador ? '100.0%' : '0.0%'}</td>
     <td class="p-2.5" id="peers-${torrent.infoHash}">0</td>
     <td class="p-2.5 text-cyan-400" id="down-speed-${torrent.infoHash}">0.0 KB/s</td>
@@ -34,9 +35,14 @@ function agregarFilaTabla(torrent, esCreador = false) {
     <td class="p-2.5 text-amber-400 font-bold font-mono" id="wallet-balance-${torrent.infoHash}">${saldoActualWallet} XNO</td>
   `;
 
+  // 2. Asignar el nombre dinámico usando textContent (Neutraliza el XSS completamente)
+  const nameCell = tr.querySelector(`#name-${torrent.infoHash}`);
+  if (nameCell) {
+    nameCell.textContent = torrent.name || torrent.infoHash.substring(0, 12);
+  }
+
   tbody.appendChild(tr);
 }
-
 // ============================================================
 // ACTUALIZACIÓN DE FILA EN TABLA (REGLAS DE GASTO Y GANANCIA)
 // ============================================================
