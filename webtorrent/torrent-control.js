@@ -4,7 +4,6 @@
 
 const wtClient = new WebTorrent();
 const PRICE_PER_PIECE = 0.000001; // XNO por pieza entregada
-const peerWallets = new Map(); // Mapa de peers e InfoHash con Billetera Nano
 
 const STABLE_TRACKERS = [
   "wss://tracker.openwebtorrent.com",
@@ -14,33 +13,28 @@ const STABLE_TRACKERS = [
 
 // Exposición global
 window.wtClient = wtClient;
-window.peerWallets = peerWallets;
 
-/**
- * Helper interno para registrar la actividad de piezas en peerWallets
- */
-function registrarActividadPeer(peerId, piezasSubidas) {
-  const datosPrevios = peerWallets.get(peerId);
-  
-  let wallet = "Desconocida";
-  let piezasAcumuladas = 0;
+function registrarActividadPeer(infoHash, rawPeerId, piezasIncremento) {
+  if (!infoHash || !rawPeerId) return;
+  const peerId =
+    typeof window.obtenerPeerIdString === "function" ? window.obtenerPeerIdString(rawPeerId) : String(rawPeerId);
 
-  if (typeof datosPrevios === "string") {
-    wallet = datosPrevios;
-  } else if (typeof datosPrevios === "object" && datosPrevios !== null) {
-    wallet = datosPrevios.wallet || "Desconocida";
-    piezasAcumuladas = datosPrevios.piezas || 0;
+  const mapaTorrent = window.torrentPeerWallets?.get(infoHash);
+  const datosPrevios = mapaTorrent?.get(peerId);
+
+  // Escudo 2: Si ya tiene una dirección válida, manténla siempre
+  let walletActual = "pendiente handshake nano...";
+  if (datosPrevios && datosPrevios.wallet && datosPrevios.wallet.startsWith("nano_")) {
+    walletActual = datosPrevios.wallet;
   }
 
-  peerWallets.set(peerId, {
-    wallet: wallet,
-    piezas: piezasAcumuladas + piezasSubidas
-  });
+  const piezasAcumuladas = Number(datosPrevios ? datosPrevios.piezas : 0) + piezasIncremento;
 
-  if (typeof window.renderizarTablaPeers === "function") {
-    window.renderizarTablaPeers();
+  if (typeof window.registrarWalletPeer === "function") {
+    window.registrarWalletPeer(infoHash, peerId, walletActual, piezasAcumuladas);
   }
 }
+window.registrarActividadPeer = registrarActividadPeer;
 
 function conectarTorrent(magnetURI) {
   console.log("🧲 [Magnet Link] Intentando conectar a:", magnetURI);
@@ -58,104 +52,78 @@ function conectarTorrent(magnetURI) {
     return;
   }
 
-  // torrent-control.js
-try {
-  const urlParams = new URLSearchParams(magnetURI.replace(/^magnet:\?/, ""));
-  const creatorWallet = urlParams.get("xl")
-    ? urlParams.get("xl").includes("creator_wallet=")
-      ? urlParams.get("xl").split("creator_wallet=")[1]
-      : null
-    : urlParams.get("creator");
+  try {
+    const urlParams = new URLSearchParams(magnetURI.replace(/^magnet:\?/, ""));
+    const creatorWallet = urlParams.get("xl")
+      ? urlParams.get("xl").includes("creator_wallet=")
+        ? urlParams.get("xl").split("creator_wallet=")[1]
+        : null
+      : urlParams.get("creator");
 
-  if (creatorWallet && window.validarDireccionNano(creatorWallet)) {
-    // Extraer el InfoHash real de 40 caracteres hex de la URI
-    const matchHash = magnetURI.match(/btih:([a-fA-F0-9]{40})/i);
-    const infoHashTarget = matchHash ? matchHash[1].toLowerCase() : null;
+    if (
+      creatorWallet &&
+      typeof window.validarDireccionNano === "function" &&
+      window.validarDireccionNano(creatorWallet)
+    ) {
+      const matchHash = magnetURI.match(/btih:([a-fA-F0-9]{40})/i);
+      const infoHashTarget = matchHash ? matchHash[1].toLowerCase() : null;
 
-    if (infoHashTarget) {
-      // Registrar la billetera vinculada exactamente al InfoHash
-      window.registrarWalletPeer(infoHashTarget, "creator", creatorWallet);
-      console.log(`👤 [Magnet Metadatos] Billetera del creador vinculada al InfoHash ${infoHashTarget}: ${creatorWallet}`);
+      if (infoHashTarget && typeof window.registrarWalletPeer === "function") {
+        window.registrarWalletPeer(infoHashTarget, "creator", creatorWallet);
+      }
     }
-  }
-} catch (err) {
-  console.warn("⚠️ Error extrayendo parámetros adicionales del Magnet Link:", err);
-}
+  } catch (err) {}
 
   const torrent = wtClient.add(magnetURI, { announce: STABLE_TRACKERS });
-  console.log(`⏳ [Torrent Agregado] InfoHash: ${torrent.infoHash}`);
 
   if (typeof window.agregarFilaTabla === "function") window.agregarFilaTabla(torrent);
 
   torrent.on("ready", () => {
-    console.info(
-      `🎬 [Torrent Ready] Metadatos cargados: "${torrent.name}" (${(torrent.length / 1024 / 1024).toFixed(2)} MB)`
-    );
     if (typeof window.reproducirTorrent === "function") window.reproducirTorrent(torrent.infoHash);
   });
 
-  // ============================================================
-  // MANEJO DE EVENTOS WIRE P2P (DESCARGA Y SUBIDA)
-  // ============================================================
   torrent.on("wire", (wire) => {
     if (typeof window.registrarNanoExtension === "function") {
       window.registrarNanoExtension(wire);
     }
 
-    // 1. EVENTO DESCARGA: Se dispara cuando el cliente recibe piezas (Leecher)
     wire.on("download", (bytes) => {
       const pieceLength = torrent.pieceLength || 16384;
       const piezas = bytes / pieceLength;
-      const costoDescarga = piezas * PRICE_PER_PIECE;
-
-      if (window.appState) {
-        window.appState.piezasServidasTotal = (window.appState.piezasServidasTotal || 0) + piezas;
-        window.appState.montoAcumulado = (window.appState.montoAcumulado || 0) + costoDescarga;
+      if (typeof window.registrarActividadPeer === "function") {
+        window.registrarActividadPeer(torrent.infoHash, wire.peerId, piezas);
       }
-
       if (typeof window.registrarTransaccionP2P === "function") {
         window.registrarTransaccionP2P(torrent.infoHash, "download", piezas);
       }
-
       if (typeof window.actualizarMetricasLiquidacion === "function") {
         window.actualizarMetricasLiquidacion();
       }
       if (typeof window.actualizarFilaTabla === "function") {
-        window.actualizarFilaTabla(torrent, torrent.progress === 1);
+        window.actualizarFilaTabla(torrent, false);
       }
     });
 
-    // 2. EVENTO SUBIDA: Se dispara cuando el cliente entrega piezas (Seeder)
     wire.on("upload", (bytes) => {
       const pieceLength = torrent.pieceLength || 16384;
       const piezas = bytes / pieceLength;
-
-      if (typeof window.registrarTransaccionP2P === "function") {
-        window.registrarTransaccionP2P(torrent.infoHash, "upload", piezas);
+      if (typeof window.registrarActividadPeer === "function") {
+        window.registrarActividadPeer(torrent.infoHash, wire.peerId, piezas);
       }
-
       const peerId = wire.peerId || wire.remoteAddress || `peer_${Math.random().toString(36).substring(2, 7)}`;
       registrarActividadPeer(peerId, piezas);
-
-      //if (window.appState) {
-        //window.appState.piezasServidasTotal = (window.appState.piezasServidasTotal || 0) + piezas;
-      //}
-
       if (typeof window.actualizarMetricasLiquidacion === "function") {
         window.actualizarMetricasLiquidacion();
       }
       if (typeof window.actualizarFilaTabla === "function") {
-        window.actualizarFilaTabla(torrent, true);
+        window.actualizarFilaTabla(torrent, false);
       }
     });
   });
 
   torrent.on("done", () => {
-    console.info(`🎉 [Torrent Completado] InfoHash: ${torrent.infoHash}. Cambiando a estado Seeding.`);
     if (typeof window.actualizarFilaTabla === "function") window.actualizarFilaTabla(torrent, true);
   });
-
-  torrent.on("error", (err) => console.error(`❌ [Error Torrent]:`, err));
 }
 
 function crearYSembrarTorrent() {
@@ -183,27 +151,29 @@ function crearYSembrarTorrent() {
 
   wtClient.seed(file, { announce: STABLE_TRACKERS }, (torrent) => {
     const magnetConWallet = `${torrent.magnetURI}&xl=creator_wallet=${currentWallet}`;
-
+    const magnetInput = document.getElementById("generated-magnet");
     console.info(`✅ [Torrent Creado] InfoHash: ${torrent.infoHash}`);
     console.log(`🔗 Magnet con Creador Anexado: ${magnetConWallet}`);
 
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(magnetConWallet);
+    if (magnetInput) {
+      magnetInput.value = magnetConWallet;
+      magnetInput.focus();
+      magnetInput.select();
     }
 
-    const magnetInput = document.getElementById("generated-magnet");
-    if (magnetInput) magnetInput.value = magnetConWallet;
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+      navigator.clipboard.writeText(magnetConWallet).catch(() => {});
+    }
 
-    alert("¡Torrent Creado en Red P2P! Magnet Link con tu dirección Nano copiado al portapapeles.");
+    alert("¡Torrent Creado en Red P2P! Magnet Link con tu dirección Nano disponible abajo.");
 
     if (typeof window.agregarFilaTabla === "function") window.agregarFilaTabla(torrent, true);
     if (typeof window.cerrarModal === "function") window.cerrarModal("modal-crear");
 
     torrent.on("wire", (wire) => {
-      const peerId = wire.peerId || wire.remoteAddress || `peer_${Math.random().toString(36).substring(2, 7)}`;
-      console.log(`🔌 [Peer Conectado a Creador] Wire: ${peerId}`);
-      
-      if (typeof window.registrarNanoExtension === "function") window.registrarNanoExtension(wire);
+      if (typeof window.registrarNanoExtension === "function") {
+        window.registrarNanoExtension(wire);
+      }
 
       wire.on("upload", (bytes) => {
         const pieceLength = torrent.pieceLength || 16384;
@@ -212,12 +182,9 @@ function crearYSembrarTorrent() {
         if (typeof window.registrarTransaccionP2P === "function") {
           window.registrarTransaccionP2P(torrent.infoHash, "upload", piezas);
         }
-        registrarActividadPeer(peerId, piezas);
-
-       // if (window.appState) {
-         // window.appState.piezasServidasTotal = (window.appState.piezasServidasTotal || 0) + piezas;
-        //}
-
+        if (typeof window.registrarActividadPeer === "function") {
+          window.registrarActividadPeer(torrent.infoHash, wire.peerId, piezas);
+        }
         if (typeof window.actualizarMetricasLiquidacion === "function") window.actualizarMetricasLiquidacion();
         if (typeof window.actualizarFilaTabla === "function") window.actualizarFilaTabla(torrent, true);
       });
@@ -231,7 +198,9 @@ function pausarTorrent(infoHash) {
     torrent.pause();
     if (torrent.wires && Array.isArray(torrent.wires)) {
       torrent.wires.forEach((wire) => {
-        try { wire.interested = false; } catch (e) {}
+        try {
+          wire.interested = false;
+        } catch (e) {}
       });
     }
 
@@ -258,10 +227,11 @@ function reanudarTorrent(infoHash) {
     torrent.resume();
     if (torrent.wires && Array.isArray(torrent.wires)) {
       torrent.wires.forEach((wire) => {
-        try { wire.interested = true; } catch (e) {}
+        try {
+          wire.interested = true;
+        } catch (e) {}
       });
     }
-
     const esCreador = torrent.progress === 1 || torrent.uploaded > 0;
     if (typeof window.actualizarFilaTabla === "function") {
       window.actualizarFilaTabla(torrent, esCreador);
@@ -271,11 +241,7 @@ function reanudarTorrent(infoHash) {
 
 function detenerTorrent(infoHash) {
   const torrent = wtClient.get(infoHash);
-  if (torrent) {
-    torrent.destroy({ destroyStore: false }, () => {
-      console.log(`⏹️ Seeding/Descarga detenida para: ${infoHash}`);
-    });
-  }
+  if (torrent) torrent.destroy({ destroyStore: false }, () => {});
 }
 
 function eliminarTorrent(infoHash) {
@@ -284,7 +250,6 @@ function eliminarTorrent(infoHash) {
     torrent.destroy({ destroyStore: true }, () => {
       const row = document.getElementById(`row-${infoHash}`);
       if (row) row.remove();
-      console.log(`🗑️ Torrent destruido y eliminado: ${infoHash}`);
     });
   } else {
     const row = document.getElementById(`row-${infoHash}`);
