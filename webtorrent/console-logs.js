@@ -1,25 +1,44 @@
 // ============================================================
-// INSPECCIÓN Y DEBUG EN CONSOLA GLOBAL
+// INSPECCIÓN Y DEBUG EN CONSOLA GLOBAL (console-logs.js)
 // ============================================================
 
 window.NanFlixDebug = {
   getStatus: () => {
     const engine = window.wtClient;
     console.group("📊 [NanFlix Debug] Estado General del Sistema");
-    console.log("💼 Billetera Local:", window.appState?.myWallet || "No configurada");
+    console.log("💼 Billetera Local:", window.appState?.myWallet || localStorage.getItem("nanflix_wallet") || "No configurada");
     console.log("🌀 Torrents Activos:", engine ? engine.torrents.length : 0);
     console.log("💰 Piezas Servidas Totales:", window.appState?.piezasServidasTotal || 0);
     console.log("💎 Monto Acumulado:", (window.appState?.montoAcumulado || 0).toFixed(6), "XNO");
 
     console.group("🤝 Peered Wallets (Peers Conectados / Creadores):");
-    if (!window.peerWallets || window.peerWallets.size === 0) {
-      console.log("No hay handshakes de billeteras registrados aún.");
-    } else {
+    
+    // Lectura sobre el mapa global actualizado 'torrentPeerWallets'
+    const mapaTorrents = window.torrentPeerWallets;
+    let tieneWallets = false;
+
+    if (mapaTorrents && mapaTorrents.size > 0) {
       const peersData = [];
-      window.peerWallets.forEach((wallet, key) => {
-        peersData.push({ Identificador: key, BilleteraNano: wallet });
+
+      mapaTorrents.forEach((mapaPeers, infoHash) => {
+        mapaPeers.forEach((datosPeer, peerId) => {
+          tieneWallets = true;
+          peersData.push({
+            Torrent: infoHash.substring(0, 8) + "...",
+            PeerID: typeof peerId === "string" ? peerId.substring(0, 12) + "..." : peerId,
+            BilleteraNano: datosPeer.wallet,
+            Piezas: datosPeer.piezas || 0
+          });
+        });
       });
-      console.table(peersData);
+
+      if (tieneWallets) {
+        console.table(peersData);
+      } else {
+        console.log("No hay handshakes de billeteras registrados aún.");
+      }
+    } else {
+      console.log("No hay handshakes de billeteras registrados aún.");
     }
     console.groupEnd();
 
@@ -43,7 +62,8 @@ window.NanFlixDebug = {
   },
 
   logPeers: () => {
-    console.log("🤝 [Peers Registrados]:", Array.from((window.peerWallets || new Map()).entries()));
+    const mapaTorrents = window.torrentPeerWallets || new Map();
+    console.log("🤝 [Peers Registrados por Torrent]:", mapaTorrents);
   }
 };
 
