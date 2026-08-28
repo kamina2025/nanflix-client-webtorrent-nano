@@ -6,26 +6,26 @@ class NanflixDetailsPanel extends HTMLElement {
   connectedCallback() {
     this.innerHTML = `
         <div class="flex border-b border-slate-800 bg-slate-950 text-xs">
-            <button id="tab-btn-reproductor" class="px-4 py-2 font-semibold border-b-2 border-cyan-500 text-cyan-400">
+            <button id="tab-btn-reproductor" class="tab-btn px-4 py-2 font-semibold border-b-2 border-cyan-500 text-cyan-400" data-tab="reproductor">
                 🎥 Reproductor & Streaming
             </button>
-            <button id="tab-btn-liquidaciones" class="px-4 py-2 font-semibold text-slate-400 hover:text-slate-200">
+            <button id="tab-btn-liquidaciones" class="tab-btn px-4 py-2 font-semibold text-slate-400 hover:text-slate-200" data-tab="liquidaciones">
                 💎 Liquidación y Handshake Nano
             </button>
-            <button id="tab-btn-peers" class="px-4 py-2 font-semibold text-slate-400 hover:text-slate-200">
+            <button id="tab-btn-peers" class="tab-btn px-4 py-2 font-semibold text-slate-400 hover:text-slate-200" data-tab="peers">
                 🔍 Peers & Billeteras
             </button>
         </div>
 
         <div class="flex-grow p-3 overflow-y-auto">
             <!-- TAB 1: REPRODUCTOR -->
-            <div id="tab-content-reproductor" class="h-full flex items-center justify-center">
+            <div id="tab-content-reproductor" class="tab-content h-full flex items-center justify-center">
                 <video id="video-player" controls class="max-h-full max-w-full rounded bg-black hidden"></video>
                 <span id="player-placeholder" class="text-xs text-slate-500 font-mono">Selecciona o descarga un torrent para comenzar la reproducción P2P.</span>
             </div>
 
             <!-- TAB 2: LIQUIDACIONES Y HANDSHAKE -->
-            <div id="tab-content-liquidaciones" class="hidden space-y-3 font-mono text-xs">
+            <div id="tab-content-liquidaciones" class="tab-content hidden space-y-3 font-mono text-xs">
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <div class="bg-slate-950 p-3 rounded border border-slate-800">
                         <span class="text-slate-400 block text-[10px]">Piezas Recibidas</span>
@@ -49,8 +49,8 @@ class NanflixDetailsPanel extends HTMLElement {
                 </div>
             </div>
 
-            <!-- TAB 3: VISUALIZADOR DE PEERS Y BASE DE DATOS P2P -->
-            <div id="tab-content-peers" class="hidden space-y-3 font-mono text-xs">
+            <!-- TAB 3: VISUALIZADOR DE PEERS -->
+            <div id="tab-content-peers" class="tab-content hidden space-y-3 font-mono text-xs">
                 <div class="flex items-center justify-between bg-slate-950 p-2.5 rounded border border-slate-800">
                     <div>
                         <span class="text-slate-200 font-bold block">Base de Datos en Memoria (peerWallets)</span>
@@ -82,17 +82,18 @@ class NanflixDetailsPanel extends HTMLElement {
             </div>
         </div>`;
 
-    // Asignación de event listeners limpios (Compatibles con CSP estricto)
-    this.querySelector('#tab-btn-reproductor')?.addEventListener('click', () => {
-      if (typeof window.cambiarTabDetalle === 'function') window.cambiarTabDetalle('reproductor');
-    });
+    this.bindEvents();
+  }
 
-    this.querySelector('#tab-btn-liquidaciones')?.addEventListener('click', () => {
-      if (typeof window.cambiarTabDetalle === 'function') window.cambiarTabDetalle('liquidaciones');
-    });
-
-    this.querySelector('#tab-btn-peers')?.addEventListener('click', () => {
-      if (typeof window.cambiarTabDetalle === 'function') window.cambiarTabDetalle('peers');
+  bindEvents() {
+    this.querySelectorAll('.tab-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const tabTarget = e.currentTarget.getAttribute('data-tab');
+        this.cambiarTab(tabTarget);
+        if (typeof window.cambiarTabDetalle === 'function') {
+          window.cambiarTabDetalle(tabTarget);
+        }
+      });
     });
 
     this.querySelector('#btn-ejecutar-liquidacion')?.addEventListener('click', () => {
@@ -102,6 +103,32 @@ class NanflixDetailsPanel extends HTMLElement {
     this.querySelector('#btn-recargar-peers')?.addEventListener('click', () => {
       if (typeof window.renderizarTablaPeers === 'function') window.renderizarTablaPeers();
     });
+  }
+
+  cambiarTab(tabName) {
+    this.querySelectorAll('.tab-content').forEach((el) => el.classList.add('hidden'));
+    this.querySelectorAll('.tab-btn').forEach((btn) => {
+      btn.classList.remove('border-b-2', 'border-cyan-500', 'text-cyan-400');
+      btn.classList.add('text-slate-400');
+    });
+
+    const targetContent = this.querySelector(`#tab-content-${tabName}`);
+    const targetBtn = this.querySelector(`#tab-btn-${tabName}`);
+
+    if (targetContent) targetContent.classList.remove('hidden');
+    if (targetBtn) {
+      targetBtn.classList.add('border-b-2', 'border-cyan-500', 'text-cyan-400');
+      targetBtn.classList.remove('text-slate-400');
+    }
+  }
+
+  // NUEVO MÉTODO: Actualizar contadores de liquidación
+  actualizarLiquidaciones(piezasTotal, montoXNO) {
+    const elPiezas = this.querySelector('#stat-piezas-total');
+    const elMonto = this.querySelector('#stat-monto-liquidar');
+
+    if (elPiezas) elPiezas.innerText = `${piezasTotal.toFixed(0)} piezas`;
+    if (elMonto) elMonto.innerText = `${montoXNO.toFixed(6)} XNO`;
   }
 }
 
