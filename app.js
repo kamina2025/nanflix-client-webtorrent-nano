@@ -33,19 +33,33 @@ function registrarHandshakeLog(msg) {
 
 // 4. Renderizado dinámico de las métricas en la Pestaña de Liquidaciones
 function actualizarMetricasLiquidacion() {
-  const piezasEl = document.getElementById("stat-piezas-total");
-  const montoEl = document.getElementById("stat-monto-liquidar");
+  const db = (typeof window.obtenerBDTorrents === "function") ? window.obtenerBDTorrents() : {};
+  const PRICE_PER_PIECE = window.PRICE_PER_PIECE || 0.000001; //
 
-  const piezas = (window.appState && typeof window.appState.piezasServidasTotal === 'number') 
-    ? window.appState.piezasServidasTotal 
-    : 0;
+  let gastoTotalXNO = 0;
 
-  const monto = (window.appState && typeof window.appState.montoAcumulado === 'number') 
-    ? window.appState.montoAcumulado 
-    : 0;
+  // Sumar el gasto de todos los torrents registrados
+  Object.values(db).forEach((item) => {
+    if (item && item.gastoTotal) {
+      gastoTotalXNO += item.gastoTotal;
+    }
+  });
 
-  if (piezasEl) piezasEl.innerText = `${Math.floor(piezas)} piezas`;
-  if (montoEl) montoEl.innerText = `${monto.toFixed(6)} XNO`;
+  // Calcular las piezas totales descargadas equivalentes
+  const piezasTotales = PRICE_PER_PIECE > 0 ? gastoTotalXNO / PRICE_PER_PIECE : 0;
+
+  // 1. Intentar actualizar mediante el Web Component
+  const panelComponent = document.querySelector('nanflix-details-panel');
+  if (panelComponent && typeof panelComponent.actualizarLiquidaciones === 'function') {
+    panelComponent.actualizarLiquidaciones(piezasTotales, gastoTotalXNO);
+  } else {
+    // 2. Fallback a búsqueda global en el DOM tradicional
+    const elPiezas = document.getElementById('stat-piezas-total');
+    const elMonto = document.getElementById('stat-monto-liquidar');
+
+    if (elPiezas) elPiezas.innerText = `${piezasTotales.toFixed(0)} piezas`;
+    if (elMonto) elMonto.innerText = `${gastoTotalXNO.toFixed(6)} XNO`;
+  }
 }
 
 // Exposición global de helpers de interfaz
