@@ -223,89 +223,181 @@ async function enviarMicropagoReal(destinatario, montoXNO, passphrase = "") {
 }
 
 // ============================================================
-// TRANSACCIONES ON-CHAIN Y LIQUIDACIÓN DE RED NANO
+// TRANSACCIONES ON-CHAIN Y LIQUIDACIÓN DE RED NANO (CORREGIDO)
 // ============================================================
-
 async function ejecutarLiquidacionOnChain(infoHashTarget = null) {
-  if (!window.appState || (window.appState.montoAcumulado || 0) <= 0) {
-    alert("No hay fondos acumulados para liquidar.");
-    return;
-  }
-
-  let destinatario = "";
-
-  // 1. Extraer billetera desde el mapa aislado torrentPeerWallets
+  const db = (typeof window.obtenerBDTorrents === "function") ? window.obtenerBDTorrents() : {};
+  
   if (!infoHashTarget && window.wtClient && window.wtClient.torrents.length > 0) {
     infoHashTarget = window.wtClient.torrents[0].infoHash;
   }
 
-  if (infoHashTarget && window.torrentPeerWallets?.has(infoHashTarget)) {
-    const mapaPeers = window.torrentPeerWallets.get(infoHashTarget);
-    for (const [key, data] of mapaPeers.entries()) {
-      let posibleWallet = typeof data === "object" ? (data.wallet || data.nanoWallet || "") : data;
-      posibleWallet = String(posibleWallet).trim();
-      if (posibleWallet && typeof window.validarDireccionNano === "function" && window.validarDireccionNano(posibleWallet)) {
-        destinatario = posibleWallet;
-        break;
-      }
-    }
+  // 1. Obtener el monto total acumulado gastado en este torrent
+  let montoTotalAcumulado = 0;
+  if (infoHashTarget && db[infoHashTarget]) {
+    montoTotalAcumulado = db[infoHashTarget].gastoTotal || 0;
+  } else {
+    Object.values(db).forEach(item => {
+      if (item && item.gastoTotal) montoTotalAcumulado += item.gastoTotal;
+    });
   }
 
-  if (!destinatario) {
-    alert("❌ Operación Cancelada: No se encontró una billetera Nano válida para este contenido.");
+  if (montoTotalAcumulado <= 0) {
+    alert("No hay fondos acumulados para liquidar.");
     return;
   }
 
-  const montoLiquidar = window.appState.montoAcumulado;
-  const montoFormateado = montoLiquidar.toFixed(6);
+  if (!infoHashTarget || !window.torrentPeerWallets?.has(infoHashTarget)) {
+    alert("❌ Operación Cancelada: No se encontraron registros de peers para este contenido.");
+    return;
+  }
 
-  const usuarioConfirma = confirm(
-    `⚠️ CONFIRMACIÓN DE LIQUIDACIÓN ON-CHAIN ⚠️\n\nMonto a enviar: ${montoFormateado} XNO\nDestinatario: ${destinatario}\n\n¿Deseas transmitir esta transacción?`
-  );
+  const mapaPeers = window.torrentPeerWallets.get(infoHashTarget);
 
+  // 2. Agrupar piezas por Wallet válida (Consolidación)
+  const walletPiezasMap = new Map(); // Map<wallet, { piezas: number, peerIds: string[] }>
+  let totalPiezasConWallet = 0;
+  let creatorWallet = null;
+
+  for (const [peerId, data] of mapaPeers.entries()) {
+    let posibleWallet = typeof data === "object" ? (data.wallet || data.nanoWallet || "") : data;
+    posibleWallet = String(posibleWallet).trim();
+    const piezas = (typeof data === "object" && data.piezas) ? Number(data.piezas) : 0;
+
+    // Detectar si esta entrada corresponde al creador
+    if (peerId === "creator" && posibleWallet && window.validarDireccionNano?.(posibleWallet)) {
+      creatorWallet = posibleWallet;
+    }
+
+    if (posibleWallet && typeof window.validarDireccionNano === "function" && window.validarDireccionNano(posibleWallet)) {
+      if (!walletPiezasMap.has(posibleWallet)) {
+        walletPiezasMap.set(posibleWallet, { piezas: 0, peerIds: [] });
+      }
+      const entry = walletPiezasMap.get(posibleWallet);
+      entry.piezas += piezas;
+      entry.peerIds.push(peerId);
+      totalPiezasConWallet += piezas;
+    }
+  }
+
+  // Fallback: Si no hay wallet del creador detectada en el mapa, buscar en appState
+  if (!creatorWallet && window.appState?.creatoresWallets?.[infoHashTarget]) {
+    creatorWallet = window.appState.creatoresWallets[infoHashTarget];
+  }
+
+  // 3. Crear lista final de beneficiarios
+  const beneficiarios = [];
+  
+  walletPiezasMap.forEach((info, wallet) => {
+    // Si la wallet es válida y aportó piezas o es la del creador, entra en la distribución
+    if (info.piezas > 0 || wallet === creatorWallet) {
+      beneficiarios.push({
+        wallet: wallet,
+        piezas: info.piezas,
+        peerIdLabel: info.peerIds[0] || "peer"
+      });
+    }
+  });
+
+  if (beneficiarios.length === 0) {
+    alert("❌ Operación Cancelada: No se encontró ninguna billetera Nano válida asignada a los peers de este contenido.");
+    return;
+  }
+
+  // 4. Calcular el desglose proporcional según las piezas reales servidas
+  let resumenPagos = `⚠️ CONFIRMACIÓN DE LIQUIDACIÓN MULTI-PEER ON-CHAIN ⚠️\n\n`;
+  resumenPagos += `Monto Total a Liquidar: ${montoTotalAcumulado.toFixed(6)} XNO\n`;
+  resumenPagos += `Direcciones Destino: ${beneficiarios.length}\n\nDesglose de Pago:\n`;
+
+  const listaPagosCalculados = beneficiarios.map(b => {
+    // Si ningún peer con wallet tiene piezas registradas todavía, se le asigna el total al creador
+    let proporcion = 0;
+    if (totalPiezasConWallet > 0) {
+      proporcion = b.piezas / totalPiezasConWallet;
+    } else if (b.wallet === creatorWallet) {
+      proporcion = 1; // Si no hay piezas de peers identificados, se le paga 100% al creador
+    } else {
+      proporcion = 1 / beneficiarios.length;
+    }
+
+    const montoPeer = montoTotalAcumulado * proporcion;
+
+    resumenPagos += `• ${b.peerIdLabel.substring(0, 10)}... (${b.wallet.substring(0, 14)}...): ${montoPeer.toFixed(6)} XNO (${b.piezas.toFixed(2)} piezas)\n`;
+
+    return {
+      wallet: b.wallet,
+      monto: montoPeer.toFixed(6),
+      montoNum: montoPeer
+    };
+  }).filter(p => parseFloat(p.monto) > 0); // Excluir aquellos con 0.000000 XNO
+
+  resumenPagos += `\n¿Deseas procesar estas transacciones On-Chain?`;
+
+  const usuarioConfirma = confirm(resumenPagos);
   if (!usuarioConfirma) return;
 
-  try {
-    const resultado = await window.enviarMicropagoReal(destinatario, montoFormateado);
+  // 5. Bucle de ejecución de micropagos On-Chain individuales
+  let pagosExitosos = 0;
+  const hashesResultado = [];
 
-    if (resultado && resultado.hash) {
-      // Notificar a los peers conectados mediante el canal P2P wire
-      if (window.wtClient && window.wtClient.torrents) {
-        window.wtClient.torrents.forEach(t => {
-          if (t.wires) {
-            t.wires.forEach(wire => {
-              if (typeof wire.extended === "function") {
-                wire.extended("nano_payment", JSON.stringify({
-                  hash: resultado.hash,
-                  monto: montoLiquidar,
-                  destinatario: destinatario
-                }));
-              }
-            });
-          }
-        });
-      }
+  for (const pago of listaPagosCalculados) {
+    try {
+      console.log(`🚀 [Liquidación Multi-Peer] Enviando ${pago.monto} XNO a ${pago.wallet}...`);
+      const passphrase = window.appState?.passphrase || "";
+      const resultado = await window.enviarMicropagoReal(pago.wallet, pago.monto, passphrase);
 
-      // Refrescar métricas y re-renderizar la tabla interactiva
-      if (typeof window.actualizarMetricasLiquidacion === "function") {
-        window.actualizarMetricasLiquidacion();
-      }
-      if (window.wtClient && window.wtClient.torrents) {
-        window.wtClient.torrents.forEach(t => {
-          if (typeof window.actualizarFilaTabla === "function") {
-            window.actualizarFilaTabla(t, t.progress === 1 || t.uploaded > 0);
-          }
-        });
-      }
+      if (resultado && resultado.hash) {
+        pagosExitosos++;
+        hashesResultado.push({ wallet: pago.wallet, hash: resultado.hash });
 
-      alert(`✅ ¡Liquidación On-Chain exitosa!\n\nBlock Hash:\n${resultado.hash}`);
+        // Notificar a peers vía wire WebTorrent
+        if (window.wtClient && window.wtClient.torrents) {
+          window.wtClient.torrents.forEach(t => {
+            if (t.wires) {
+              t.wires.forEach(wire => {
+                if (typeof wire.extended === "function") {
+                  wire.extended("nano_payment", JSON.stringify({
+                    hash: resultado.hash,
+                    monto: pago.montoNum,
+                    destinatario: pago.wallet
+                  }));
+                }
+              });
+            }
+          });
+        }
+      }
+    } catch (error) {
+      console.error(`❌ [Error en Liquidación a ${pago.wallet}]:`, error);
+      alert(`Error al enviar pago a ${pago.wallet.substring(0, 12)}...:\n${error.message}`);
     }
-  } catch (error) {
-    console.error("❌ [Liquidación Error]:", error);
-    alert(`Error en producción On-Chain: ${error.message}`);
   }
-}
-// Exposición Global
+
+  // 6. Limpieza y refresco visual tras liquidar
+  if (pagosExitosos > 0) {
+    if (infoHashTarget && db[infoHashTarget]) {
+      db[infoHashTarget].gastoTotal = 0;
+      if (typeof window.guardarBDTorrents === "function") window.guardarBDTorrents(db);
+    }
+
+    if (typeof window.actualizarMetricasLiquidacion === "function") {
+      window.actualizarMetricasLiquidacion();
+    }
+    if (window.wtClient && window.wtClient.torrents) {
+      window.wtClient.torrents.forEach(t => {
+        if (typeof window.actualizarFilaTabla === "function") {
+          window.actualizarFilaTabla(t, t.progress === 1 || t.uploaded > 0);
+        }
+      });
+    }
+
+    let msgExito = `✅ ¡Liquidación On-Chain completada con éxito!\n\nTransacciones enviadas: ${pagosExitosos}/${listaPagosCalculados.length}\n\nHashes:\n`;
+    hashesResultado.forEach(h => {
+      msgExito += `${h.wallet.substring(0, 12)}... -> ${h.hash.substring(0, 16)}...\n`;
+    });
+    alert(msgExito);
+  }
+}// Exposición Global
 window.nanoRPC = nanoRPC;
 window.enviarMicropagoReal = enviarMicropagoReal;
 window.ejecutarLiquidacionOnChain = ejecutarLiquidacionOnChain;
