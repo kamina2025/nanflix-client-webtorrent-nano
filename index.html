@@ -4,15 +4,16 @@
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <!-- Content Security Policy: Protege contra DOM XSS e inyecciones -->
-       <meta http-equiv="Content-Security-Policy" 
-      content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; connect-src 'self' https: wss:; img-src 'self' data: blob:;" />
+        <meta
+            http-equiv="Content-Security-Policy"
+            content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; connect-src 'self' https: wss:; img-src 'self' data: blob:;" />
         <title>NanFlix P2P Persistent Node MVP</title>
 
         <script>
             window.tailwind = { config: { suppressWarnings: true } };
         </script>
         <!-- Carga del nuevo paquete browser v4 de Tailwind -->
-<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+        <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 
         <script src="nanocurrency.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/webtorrent@latest/webtorrent.min.js"></script>
@@ -115,7 +116,10 @@
         <script src="nano/wallet.js"></script>
         <script src="nano/recep-envios.js"></script>
         <!-- Módulos de WebTorrent -->
-        <script src="webtorrent/nano-handshake.js"></script>
+        <!-- Módulos de presetnacion y pago -->
+        <script src="nano-extension/wire-payment.js"></script>
+        <script src="nano-extension/wire-handshake.js"></script>
+
         <script src="webtorrent/base-datos.js"></script>
 
         <script src="webtorrent/tabla-dinamica.js"></script>
