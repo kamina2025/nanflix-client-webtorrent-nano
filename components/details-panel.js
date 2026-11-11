@@ -1,9 +1,16 @@
 // ============================================================
-// COMPONENTE: WEB COMPONENT DEL PANEL DE DETALLES
+// COMPONENTE: WEB COMPONENT DEL PANEL DE DETALLES (REFACTORIZADO)
 // ============================================================
 
 class NanflixDetailsPanel extends HTMLElement {
+  constructor() {
+    super();
+    this._initialized = false;
+  }
+
   connectedCallback() {
+    if (this._initialized) return;
+
     this.innerHTML = `
         <div class="flex border-b border-slate-800 bg-slate-950 text-xs">
             <button id="tab-btn-reproductor" class="tab-btn px-4 py-2 font-semibold border-b-2 border-cyan-500 text-cyan-400" data-tab="reproductor">
@@ -83,6 +90,7 @@ class NanflixDetailsPanel extends HTMLElement {
         </div>`;
 
     this.bindEvents();
+    this._initialized = true;
   }
 
   bindEvents() {
@@ -90,6 +98,17 @@ class NanflixDetailsPanel extends HTMLElement {
       btn.addEventListener('click', (e) => {
         const tabTarget = e.currentTarget.getAttribute('data-tab');
         this.cambiarTab(tabTarget);
+
+        // Desacoplamiento mediante evento nativo
+        this.dispatchEvent(
+          new CustomEvent('tab-changed', {
+            detail: { tab: tabTarget },
+            bubbles: true,
+            composed: true
+          })
+        );
+
+        // Fallback defensivo a global legacy
         if (typeof window.cambiarTabDetalle === 'function') {
           window.cambiarTabDetalle(tabTarget);
         }
@@ -97,15 +116,35 @@ class NanflixDetailsPanel extends HTMLElement {
     });
 
     this.querySelector('#btn-ejecutar-liquidacion')?.addEventListener('click', () => {
-      if (typeof window.ejecutarLiquidacionOnChain === 'function') window.ejecutarLiquidacionOnChain();
+      this.dispatchEvent(
+        new CustomEvent('ejecutar-liquidacion', {
+          bubbles: true,
+          composed: true
+        })
+      );
+
+      if (typeof window.ejecutarLiquidacionOnChain === 'function') {
+        window.ejecutarLiquidacionOnChain();
+      }
     });
 
     this.querySelector('#btn-recargar-peers')?.addEventListener('click', () => {
-      if (typeof window.renderizarTablaPeers === 'function') window.renderizarTablaPeers();
+      this.dispatchEvent(
+        new CustomEvent('recargar-peers', {
+          bubbles: true,
+          composed: true
+        })
+      );
+
+      if (typeof window.renderizarTablaPeers === 'function') {
+        window.renderizarTablaPeers();
+      }
     });
   }
 
   cambiarTab(tabName) {
+    if (!tabName) return;
+
     this.querySelectorAll('.tab-content').forEach((el) => el.classList.add('hidden'));
     this.querySelectorAll('.tab-btn').forEach((btn) => {
       btn.classList.remove('border-b-2', 'border-cyan-500', 'text-cyan-400');
@@ -122,13 +161,75 @@ class NanflixDetailsPanel extends HTMLElement {
     }
   }
 
-  // NUEVO MÉTODO: Actualizar contadores de liquidación
-  actualizarLiquidaciones(piezasTotal, montoXNO) {
+  // MÉTODOS PÚBLICOS ROBUSTOS Y SEGUROS
+
+  actualizarLiquidaciones(piezasTotal = 0, montoXNO = 0) {
     const elPiezas = this.querySelector('#stat-piezas-total');
     const elMonto = this.querySelector('#stat-monto-liquidar');
 
-    if (elPiezas) elPiezas.innerText = `${piezasTotal.toFixed(0)} piezas`;
-    if (elMonto) elMonto.innerText = `${montoXNO.toFixed(6)} XNO`;
+    const piezasNum = Number(piezasTotal) || 0;
+    const montoNum = Number(montoXNO) || 0;
+
+    if (elPiezas) elPiezas.textContent = `${piezasNum.toFixed(0)} piezas`;
+    if (elMonto) elMonto.textContent = `${montoNum.toFixed(6)} XNO`;
+  }
+
+  // Agrega entradas al log de Handshake evitando inyección XSS
+  agregarLogHandshake(mensaje, tipo = 'info') {
+    const container = this.querySelector('#handshake-log');
+    if (!container) return;
+
+    const logEntry = document.createElement('div');
+    logEntry.className = tipo === 'exito' 
+      ? 'text-emerald-400' 
+      : tipo === 'error' 
+      ? 'text-rose-400' 
+      : 'text-slate-400';
+
+    logEntry.textContent = `[${new Date().toLocaleTimeString()}] ${mensaje}`;
+    container.appendChild(logEntry);
+    container.scrollTop = container.scrollHeight;
+  }
+
+  // Renderiza peers de manera segura mediante manipulación DOM directa
+  actualizarPeersTabla(peersArray = []) {
+    const tbody = this.querySelector('#peers-table-body');
+    if (!tbody) return;
+
+    tbody.innerHTML = '';
+
+    if (!Array.isArray(peersArray) || peersArray.length === 0) {
+      const emptyRow = document.createElement('tr');
+      emptyRow.innerHTML = `
+        <td colspan="3" class="p-4 text-center text-slate-500 italic">
+          No hay peers ni billeteras registradas en el mapa actual.
+        </td>`;
+      tbody.appendChild(emptyRow);
+      return;
+    }
+
+    peersArray.forEach((peer) => {
+      const tr = document.createElement('tr');
+      tr.className = 'hover:bg-slate-900/50 transition-colors';
+
+      const tdId = document.createElement('td');
+      tdId.className = 'p-2 font-mono text-slate-300';
+      tdId.textContent = peer.id ? `${peer.id.substring(0, 12)}...` : 'Unknown';
+
+      const tdPiezas = document.createElement('td');
+      tdPiezas.className = 'p-2 font-mono text-amber-400 font-bold';
+      tdPiezas.textContent = `${Number(peer.piezas) || 0} pzs`;
+
+      const tdWallet = document.createElement('td');
+      tdWallet.className = 'p-2 font-mono text-emerald-400';
+      tdWallet.textContent = peer.wallet || 'No vinculada';
+
+      tr.appendChild(tdId);
+      tr.appendChild(tdPiezas);
+      tr.appendChild(tdWallet);
+
+      tbody.appendChild(tr);
+    });
   }
 }
 
