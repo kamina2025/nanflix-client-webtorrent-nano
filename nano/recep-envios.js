@@ -1,34 +1,38 @@
 // ============================================================
-// TRANSACCIONES ON-CHAIN & PETICIONES RPC (NANO.TO / CUSTOM NODE)
+// TRANSACCIONES ON-CHAIN, LISTENER WEBSOCKET & RPC (NANO.TO / CUSTOM NODE)
 // ============================================================
 
-// 1. Lista blanca de endpoints RPC seguros (evita exfiltración de API Keys)
 const ALLOWED_RPC_ENDPOINTS = [
   "https://rpc.nano.to",
   "https://nano.app/api/rpc",
   "https://nodes.nanolify.com/0"
 ];
 
-// Helper seguro para obtener la semilla cifrada desde storage y descifrarla en memoria
+const DEFAULT_WS_ENDPOINT = "wss://ws.nano.to";
+
+/**
+ * Obtiene la semilla Nano descifrada en memoria mediante WebCrypto (AES-GCM + PBKDF2)
+ * con soporte de retrocompatibilidad para semillas sin cifrar (legacy).
+ */
 async function obtenerSeedSegura(passphrase = "") {
   const encryptedSeedBase64 = localStorage.getItem("nanflix_encrypted_seed");
   const legacySeed = localStorage.getItem("nanflix_seed");
 
-  // Retrocompatibilidad/Migración: Si existía una semilla sin cifrar, forzamos su limpieza o uso controlado
   if (!encryptedSeedBase64 && legacySeed) {
     if (legacySeed.length === 64 || legacySeed.length === 128) {
-      console.warn("⚠️ Detectada semilla en texto plano legacy. Se recomienda migrar a cifrado.");
+      console.warn("⚠️ [Seguridad] Detectada semilla legacy en texto plano. Se sugiere cifrar la billetera.");
       return legacySeed;
     }
   }
 
   if (!encryptedSeedBase64) {
-    throw new Error("No hay ninguna semilla guardada en el almacenamiento local.");
+    throw new Error("No hay ninguna semilla Nano almacenada localmente.");
   }
 
-  // Si se utiliza cifrado WebCrypto (AES-GCM)
   try {
-    const encryptedData = new Uint8Array(atob(encryptedSeedBase64).split("").map(c => c.charCodeAt(0)));
+    const encryptedData = new Uint8Array(
+      atob(encryptedSeedBase64).split("").map(c => c.charCodeAt(0))
+    );
     const salt = encryptedData.slice(0, 16);
     const iv = encryptedData.slice(16, 28);
     const ciphertext = encryptedData.slice(28);
@@ -63,15 +67,34 @@ async function obtenerSeedSegura(passphrase = "") {
 
     return new TextDecoder().decode(decrypted);
   } catch (err) {
-    throw new Error("Error al descifrar la semilla Nano. Clave o passphrase incorrecta.");
+    throw new Error("Error al descifrar la semilla Nano: Passphrase o clave incorrecta.");
   }
 }
 
-// Cliente RPC genérico seguro
+/**
+ * Deriva la clave privada ED25519 desde una semilla de 64 o 128 caracteres hexadecimales.
+ */
+function derivarPrivateKey(seed, NanoLib) {
+  if (seed.length === 64) {
+    if (typeof NanoLib.wallet?.fromLegacySeed === "function") {
+      return NanoLib.wallet.fromLegacySeed(seed).accounts[0].privateKey;
+    }
+    if (typeof NanoLib.deriveSecretKey === "function") {
+      return NanoLib.deriveSecretKey(seed, 0);
+    }
+  } else if (seed.length === 128) {
+    if (typeof NanoLib.wallet?.fromSeed === "function") {
+      return NanoLib.wallet.fromSeed(seed).accounts[0].privateKey;
+    }
+  }
+  throw new Error("Formato de semilla inválido o librería de criptografía no disponible.");
+}
+
+/**
+ * Cliente RPC genérico seguro con verificación de dominios permitidos.
+ */
 async function nanoRPC(action, data = {}) {
   const endpoint = window.appState?.rpcEndpoint || "https://rpc.nano.to";
-  
-  // Verificación contra Allowlist de dominios para enviar credenciales
   const esEndpointSeguro = ALLOWED_RPC_ENDPOINTS.some(allowed => endpoint.startsWith(allowed));
   const apiKey = (esEndpointSeguro && window.appState?.apiKey) ? window.appState.apiKey : undefined;
 
@@ -81,10 +104,7 @@ async function nanoRPC(action, data = {}) {
     ...data
   };
 
-  const headers = {
-    "Content-Type": "application/json"
-  };
-
+  const headers = { "Content-Type": "application/json" };
   if (apiKey) {
     headers["Authorization"] = `Bearer ${apiKey}`;
   }
@@ -96,24 +116,28 @@ async function nanoRPC(action, data = {}) {
   });
 
   if (!response.ok) {
-    throw new Error(`Error HTTP en RPC: ${response.status} ${response.statusText}`);
+    throw new Error(`Error HTTP RPC ${response.status}: ${response.statusText}`);
   }
 
-  return await response.json();
+  const json = await response.json();
+  if (json.error) {
+    throw new Error(`RPC Node Error: ${json.error}`);
+  }
+
+  return json;
 }
 
-// Envío e inserción de micropagos en la Blockchain Nano
+/**
+ * Firma localmente y transmite una transacción 'send' on-chain.
+ */
 async function enviarMicropagoReal(destinatario, montoXNO, passphrase = "") {
-  const NanoLib = typeof window.getNanoLib === "function" ? window.getNanoLib() : null;
+  const NanoLib = typeof window.getNanoLib === "function" ? window.getNanoLib() : (window.NanocurrencyWeb || null);
   const currentWallet = window.appState?.myWallet || localStorage.getItem("nanflix_wallet");
 
   destinatario = String(destinatario || "").trim();
 
-  // Obtención segura de la semilla únicamente dentro del scope de esta función
-  const currentSeed = await obtenerSeedSegura(passphrase);
-
-  if (!destinatario || !destinatario.startsWith("nano_")) {
-    throw new Error("La dirección de destino no es una dirección Nano válida.");
+  if (!destinatario || (!destinatario.startsWith("nano_") && !destinatario.startsWith("xrb_"))) {
+    throw new Error("La dirección del destinatario no es una cuenta Nano válida.");
   }
 
   if (!montoXNO || parseFloat(montoXNO) <= 0) {
@@ -121,57 +145,40 @@ async function enviarMicropagoReal(destinatario, montoXNO, passphrase = "") {
   }
 
   if (!NanoLib) {
-    throw new Error("La librería de funciones Nano (NanocurrencyWeb) no está cargada.");
+    throw new Error("La librería de criptografía Nano (NanocurrencyWeb) no está disponible.");
   }
 
-  try {
-    console.log(`🔄 [Nano RPC] Consultando estado de la cuenta origen: ${currentWallet}...`);
+  let privateKey = null;
 
+  try {
+    const currentSeed = await obtenerSeedSegura(passphrase);
+    privateKey = derivarPrivateKey(currentSeed, NanoLib);
+
+    console.log(`🔄 [Nano RPC] Consultando estado de la cuenta origen: ${currentWallet}...`);
     const accountInfo = await nanoRPC("account_info", {
       account: currentWallet,
       representative: true
     });
 
-    if (accountInfo.error) {
-      throw new Error(`Error en nodo RPC: ${accountInfo.error}. Si la cuenta es nueva, debe recibir un depósito primero.`);
-    }
-
-    let privateKey = "";
-    if (currentSeed.length === 64) {
-      if (typeof NanoLib.wallet?.fromLegacySeed === "function") {
-        privateKey = NanoLib.wallet.fromLegacySeed(currentSeed).accounts[0].privateKey;
-      } else if (typeof NanoLib.deriveSecretKey === "function") {
-        privateKey = NanoLib.deriveSecretKey(currentSeed, 0);
-      }
-    } else if (currentSeed.length === 128) {
-      if (typeof NanoLib.wallet?.fromSeed === "function") {
-        privateKey = NanoLib.wallet.fromSeed(currentSeed).accounts[0].privateKey;
-      }
-    }
-
-    if (!privateKey) {
-      throw new Error("No se pudo obtener la clave privada desde la semilla descifrada.");
-    }
-
-    const rawAmount = NanoLib.tools 
-      ? NanoLib.tools.convert(montoXNO.toString(), "NANO", "RAW") 
+    const rawAmount = NanoLib.tools
+      ? NanoLib.tools.convert(montoXNO.toString(), "NANO", "RAW")
       : (BigInt(Math.floor(montoXNO * 1e30))).toString();
 
     const currentBalanceRaw = accountInfo.balance;
 
     if (BigInt(currentBalanceRaw) < BigInt(rawAmount)) {
-      const balanceNANO = NanoLib.tools 
-        ? NanoLib.tools.convert(currentBalanceRaw, "RAW", "NANO") 
+      const balanceNANO = NanoLib.tools
+        ? NanoLib.tools.convert(currentBalanceRaw, "RAW", "NANO")
         : (Number(currentBalanceRaw) / 1e30).toFixed(6);
 
-      throw new Error(`Saldo insuficiente. Tienes ${balanceNANO} XNO y necesitas ${montoXNO} XNO.`);
+      throw new Error(`Saldo insuficiente: Tienes ${balanceNANO} XNO y requieres ${montoXNO} XNO.`);
     }
 
     console.log("⚙️ [Nano RPC] Generando PoW para el bloque send...");
     const workResponse = await nanoRPC("work_generate", { hash: accountInfo.frontier });
 
     if (!workResponse || !workResponse.work) {
-      throw new Error("No se pudo generar el PoW a través del nodo RPC.");
+      throw new Error("No se pudo obtener el PoW necesario para la transacción.");
     }
 
     console.log("🔑 Firmando bloque de transacción localmente...");
@@ -183,7 +190,7 @@ async function enviarMicropagoReal(destinatario, montoXNO, passphrase = "") {
           walletBalanceRaw: currentBalanceRaw,
           fromAddress: currentWallet,
           toAddress: destinatario,
-          representativeAddress: accountInfo.representative,
+          representativeAddress: accountInfo.representative || currentWallet,
           frontier: accountInfo.frontier,
           amountRaw: rawAmount,
           work: workResponse.work
@@ -191,11 +198,8 @@ async function enviarMicropagoReal(destinatario, montoXNO, passphrase = "") {
         privateKey
       );
     } else {
-      throw new Error("El método para firmar bloques no está soportado por la librería cargada.");
+      throw new Error("Método de firma de bloques no soportado por la librería instalada.");
     }
-
-    // Limpieza de privateKey en memoria
-    privateKey = null;
 
     console.log("🚀 Transmitiendo transacción On-Chain a la red Nano...");
     const processResponse = await nanoRPC("process", {
@@ -213,26 +217,159 @@ async function enviarMicropagoReal(destinatario, montoXNO, passphrase = "") {
         destinatario: destinatario
       };
     } else {
-      throw new Error(processResponse.error || "Fallo al procesar el bloque en la red.");
+      throw new Error(processResponse.error || "Fallo al procesar el bloque send.");
     }
-
   } catch (error) {
     console.error("❌ Error en enviarMicropagoReal:", error);
     throw error;
+  } finally {
+    privateKey = null;
   }
 }
 
 // ============================================================
-// TRANSACCIONES ON-CHAIN Y LIQUIDACIÓN DE RED NANO (CORREGIDO)
+// AUTO-RECEIVE ON-CHAIN & WEBSOCKET LISTENER EN TIEMPO REAL
+// ============================================================
+
+let socketCreadorRecep = null;
+
+/**
+ * Escucha en tiempo real bloques 'send' dirigidos a la cuenta creadora y ejecuta el auto-receive.
+ */
+function iniciarEscuchaCreador(creatorWallet, passphrase = "") {
+  const wsUrl = window.appState?.wsEndpoint || DEFAULT_WS_ENDPOINT;
+
+  if (socketCreadorRecep && socketCreadorRecep.readyState === WebSocket.OPEN) {
+    console.log("📡 [Nano WS] El listener de recepción ya se encuentra activo.");
+    return;
+  }
+
+  try {
+    socketCreadorRecep = new WebSocket(wsUrl);
+
+    socketCreadorRecep.onopen = () => {
+      console.log(`📡 [Nano WebSocket] Escuchando depósitos en tiempo real para: ${creatorWallet}`);
+      const subscribeMsg = {
+        action: "subscribe",
+        topic: "confirmation",
+        options: {
+          accounts: [creatorWallet]
+        }
+      };
+      socketCreadorRecep.send(JSON.stringify(subscribeMsg));
+    };
+
+    socketCreadorRecep.onmessage = async (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.topic === "confirmation" && data.message?.block?.link_as_account === creatorWallet) {
+          const sendHash = data.message.hash;
+          const amountRaw = data.message.amount;
+
+          console.log(`📥 [Nano WS] Pago entrante detectado | Send Hash: ${sendHash} | Raw: ${amountRaw}`);
+          await procesarBloqueReceive(creatorWallet, sendHash, amountRaw, passphrase);
+        }
+      } catch (err) {
+        console.error("⚠️ [Nano WS Error procesando mensaje]:", err);
+      }
+    };
+
+    socketCreadorRecep.onerror = (err) => console.error("❌ [Nano WS Error]:", err);
+    socketCreadorRecep.onclose = () => {
+      console.warn("🔄 [Nano WS] Conexión cerrada. Reconectando en 5 segundos...");
+      setTimeout(() => iniciarEscuchaCreador(creatorWallet, passphrase), 5000);
+    };
+  } catch (err) {
+    console.error("❌ [Nano WS Exception]:", err);
+  }
+}
+
+/**
+ * Genera, firma y transmite un bloque 'receive' (state) para consolidar fondos recibidos.
+ */
+async function procesarBloqueReceive(wallet, sendHash, amountRaw, passphrase = "") {
+  const NanoLib = typeof window.getNanoLib === "function" ? window.getNanoLib() : (window.NanocurrencyWeb || null);
+  if (!NanoLib) {
+    console.error("❌ No se puede procesar el bloque receive: NanoLib no cargada.");
+    return;
+  }
+
+  let privateKey = null;
+
+  try {
+    console.log(`🔄 [Nano RPC] Consultando frontera para auto-receive en: ${wallet}...`);
+    let accountInfo = null;
+    let isNewAccount = false;
+
+    try {
+      accountInfo = await nanoRPC("account_info", { account: wallet, representative: true });
+    } catch (e) {
+      isNewAccount = true;
+    }
+
+    const previousHash = isNewAccount ? "0000000000000000000000000000000000000000000000000000000000000000" : accountInfo.frontier;
+    const currentBalance = isNewAccount ? BigInt(0) : BigInt(accountInfo.balance || "0");
+    const newBalanceRaw = (currentBalance + BigInt(amountRaw)).toString();
+    const representative = (!isNewAccount && accountInfo.representative) ? accountInfo.representative : wallet;
+
+    const powTarget = isNewAccount ? wallet : previousHash;
+    console.log("⚙️ [Nano RPC] Generando PoW para bloque receive...");
+    const workResp = await nanoRPC("work_generate", { hash: powTarget });
+
+    const currentSeed = await obtenerSeedSegura(passphrase);
+    privateKey = derivarPrivateKey(currentSeed, NanoLib);
+
+    console.log("🔑 Firmando bloque receive localmente...");
+    let signedBlock = null;
+
+    if (NanoLib.block && typeof NanoLib.block.receive === "function") {
+      signedBlock = NanoLib.block.receive(
+        {
+          walletBalanceRaw: newBalanceRaw,
+          toAddress: wallet,
+          representativeAddress: representative,
+          frontier: previousHash,
+          transactionHash: sendHash,
+          work: workResp.work
+        },
+        privateKey
+      );
+    } else {
+      throw new Error("Librería de criptografía no soporta NanoLib.block.receive.");
+    }
+
+    console.log("🚀 Transmitiendo bloque Receive On-Chain...");
+    const processResp = await nanoRPC("process", {
+      json_block: "true",
+      subtype: "receive",
+      block: signedBlock
+    });
+
+    if (processResp && processResp.hash) {
+      console.log(`✅ Bloque Receive Confirmado On-Chain: ${processResp.hash}`);
+      if (typeof window.actualizarBalanceUI === "function") {
+        window.actualizarBalanceUI();
+      }
+    } else {
+      console.error("❌ Fallo al transmitir el bloque receive:", processResp);
+    }
+  } catch (error) {
+    console.error("💥 Error durante el flujo auto-receive:", error);
+  } finally {
+    privateKey = null;
+  }
+}
+
+// ============================================================
+// LIQUIDACIÓN MULTI-PEER SOBRE LA RED NANO
 // ============================================================
 async function ejecutarLiquidacionOnChain(infoHashTarget = null) {
   const db = (typeof window.obtenerBDTorrents === "function") ? window.obtenerBDTorrents() : {};
-  
+
   if (!infoHashTarget && window.wtClient && window.wtClient.torrents.length > 0) {
     infoHashTarget = window.wtClient.torrents[0].infoHash;
   }
 
-  // 1. Obtener el monto total acumulado gastado en este torrent
   let montoTotalAcumulado = 0;
   if (infoHashTarget && db[infoHashTarget]) {
     montoTotalAcumulado = db[infoHashTarget].gastoTotal || 0;
@@ -253,9 +390,7 @@ async function ejecutarLiquidacionOnChain(infoHashTarget = null) {
   }
 
   const mapaPeers = window.torrentPeerWallets.get(infoHashTarget);
-
-  // 2. Agrupar piezas por Wallet válida (Consolidación)
-  const walletPiezasMap = new Map(); // Map<wallet, { piezas: number, peerIds: string[] }>
+  const walletPiezasMap = new Map();
   let totalPiezasConWallet = 0;
   let creatorWallet = null;
 
@@ -264,12 +399,15 @@ async function ejecutarLiquidacionOnChain(infoHashTarget = null) {
     posibleWallet = String(posibleWallet).trim();
     const piezas = (typeof data === "object" && data.piezas) ? Number(data.piezas) : 0;
 
-    // Detectar si esta entrada corresponde al creador
-    if (peerId === "creator" && posibleWallet && window.validarDireccionNano?.(posibleWallet)) {
+    if (peerId === "creator" && posibleWallet) {
       creatorWallet = posibleWallet;
     }
 
-    if (posibleWallet && typeof window.validarDireccionNano === "function" && window.validarDireccionNano(posibleWallet)) {
+    const esValida = typeof window.validarDireccionNano === "function" 
+      ? window.validarDireccionNano(posibleWallet)
+      : (posibleWallet.startsWith("nano_") || posibleWallet.startsWith("xrb_"));
+
+    if (posibleWallet && esValida) {
       if (!walletPiezasMap.has(posibleWallet)) {
         walletPiezasMap.set(posibleWallet, { piezas: 0, peerIds: [] });
       }
@@ -280,16 +418,12 @@ async function ejecutarLiquidacionOnChain(infoHashTarget = null) {
     }
   }
 
-  // Fallback: Si no hay wallet del creador detectada en el mapa, buscar en appState
   if (!creatorWallet && window.appState?.creatoresWallets?.[infoHashTarget]) {
     creatorWallet = window.appState.creatoresWallets[infoHashTarget];
   }
 
-  // 3. Crear lista final de beneficiarios
   const beneficiarios = [];
-  
   walletPiezasMap.forEach((info, wallet) => {
-    // Si la wallet es válida y aportó piezas o es la del creador, entra en la distribución
     if (info.piezas > 0 || wallet === creatorWallet) {
       beneficiarios.push({
         wallet: wallet,
@@ -304,24 +438,21 @@ async function ejecutarLiquidacionOnChain(infoHashTarget = null) {
     return;
   }
 
-  // 4. Calcular el desglose proporcional según las piezas reales servidas
   let resumenPagos = `⚠️ CONFIRMACIÓN DE LIQUIDACIÓN MULTI-PEER ON-CHAIN ⚠️\n\n`;
   resumenPagos += `Monto Total a Liquidar: ${montoTotalAcumulado.toFixed(6)} XNO\n`;
   resumenPagos += `Direcciones Destino: ${beneficiarios.length}\n\nDesglose de Pago:\n`;
 
   const listaPagosCalculados = beneficiarios.map(b => {
-    // Si ningún peer con wallet tiene piezas registradas todavía, se le asigna el total al creador
     let proporcion = 0;
     if (totalPiezasConWallet > 0) {
       proporcion = b.piezas / totalPiezasConWallet;
     } else if (b.wallet === creatorWallet) {
-      proporcion = 1; // Si no hay piezas de peers identificados, se le paga 100% al creador
+      proporcion = 1;
     } else {
       proporcion = 1 / beneficiarios.length;
     }
 
     const montoPeer = montoTotalAcumulado * proporcion;
-
     resumenPagos += `• ${b.peerIdLabel.substring(0, 10)}... (${b.wallet.substring(0, 14)}...): ${montoPeer.toFixed(6)} XNO (${b.piezas.toFixed(2)} piezas)\n`;
 
     return {
@@ -329,28 +460,25 @@ async function ejecutarLiquidacionOnChain(infoHashTarget = null) {
       monto: montoPeer.toFixed(6),
       montoNum: montoPeer
     };
-  }).filter(p => parseFloat(p.monto) > 0); // Excluir aquellos con 0.000000 XNO
+  }).filter(p => parseFloat(p.monto) > 0);
 
   resumenPagos += `\n¿Deseas procesar estas transacciones On-Chain?`;
 
-  const usuarioConfirma = confirm(resumenPagos);
-  if (!usuarioConfirma) return;
+  if (!confirm(resumenPagos)) return;
 
-  // 5. Bucle de ejecución de micropagos On-Chain individuales
   let pagosExitosos = 0;
   const hashesResultado = [];
+  const passphrase = window.appState?.passphrase || "";
 
   for (const pago of listaPagosCalculados) {
     try {
       console.log(`🚀 [Liquidación Multi-Peer] Enviando ${pago.monto} XNO a ${pago.wallet}...`);
-      const passphrase = window.appState?.passphrase || "";
-      const resultado = await window.enviarMicropagoReal(pago.wallet, pago.monto, passphrase);
+      const resultado = await enviarMicropagoReal(pago.wallet, pago.monto, passphrase);
 
       if (resultado && resultado.hash) {
         pagosExitosos++;
         hashesResultado.push({ wallet: pago.wallet, hash: resultado.hash });
 
-        // Notificar a peers vía wire WebTorrent
         if (window.wtClient && window.wtClient.torrents) {
           window.wtClient.torrents.forEach(t => {
             if (t.wires) {
@@ -373,7 +501,6 @@ async function ejecutarLiquidacionOnChain(infoHashTarget = null) {
     }
   }
 
-  // 6. Limpieza y refresco visual tras liquidar
   if (pagosExitosos > 0) {
     if (infoHashTarget && db[infoHashTarget]) {
       db[infoHashTarget].gastoTotal = 0;
@@ -397,7 +524,14 @@ async function ejecutarLiquidacionOnChain(infoHashTarget = null) {
     });
     alert(msgExito);
   }
-}// Exposición Global
+}
+
+// ============================================================
+// EXPOSICIÓN GLOBAL A WINDOW (VANILLA JS COMPATIBLE)
+// ============================================================
+window.obtenerSeedSegura = obtenerSeedSegura;
 window.nanoRPC = nanoRPC;
 window.enviarMicropagoReal = enviarMicropagoReal;
+window.iniciarEscuchaCreador = iniciarEscuchaCreador;
+window.procesarBloqueReceive = procesarBloqueReceive;
 window.ejecutarLiquidacionOnChain = ejecutarLiquidacionOnChain;

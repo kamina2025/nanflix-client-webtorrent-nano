@@ -7,10 +7,10 @@ const PRICE_PER_PIECE = 0.000001; // XNO por pieza entregada
 
 const STABLE_TRACKERS = [
   'ws://localhost:8000',                        // Tu tracker local en Windows
-  'wss://tracker.nanflix.io:443/announce',       // Tracker principal oficial
-  "wss://tracker.openwebtorrent.com",
-  "wss://tracker.files.fm:443/announce",
-  "wss://tracker.webtorrent.dev"
+ //'wss://tracker.nanflix.io:443/announce',       // Tracker principal oficial
+  //"wss://tracker.openwebtorrent.com",
+  //"wss://tracker.files.fm:443/announce",
+  //"wss://tracker.webtorrent.dev"
 ];
 
 // Exposición global
