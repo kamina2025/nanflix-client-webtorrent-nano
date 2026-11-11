@@ -6,6 +6,8 @@ const wtClient = new WebTorrent();
 const PRICE_PER_PIECE = 0.000001; // XNO por pieza entregada
 
 const STABLE_TRACKERS = [
+  'ws://localhost:8000',                        // Tu tracker local en Windows
+  'wss://tracker.nanflix.io:443/announce',       // Tracker principal oficial
   "wss://tracker.openwebtorrent.com",
   "wss://tracker.files.fm:443/announce",
   "wss://tracker.webtorrent.dev"
@@ -149,11 +151,27 @@ function crearYSembrarTorrent() {
   const file = fileInput.files[0];
   console.log(`📁 Archivo seleccionado: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
 
-  wtClient.seed(file, { announce: STABLE_TRACKERS }, (torrent) => {
-    const magnetConWallet = `${torrent.magnetURI}&xl=creator_wallet=${currentWallet}`;
+  // Opciones de siembra con estructura 'announce' y 'announceList' (tiers)
+  const seedOptions = {
+    announce: STABLE_TRACKERS,
+    announceList: STABLE_TRACKERS.map(tr => [tr])
+  };
+
+  wtClient.seed(file, seedOptions, (torrent) => {
+    // Garantizar que todos los STABLE_TRACKERS estén presentes en la cadena Magnet final
+    let magnetBase = torrent.magnetURI;
+    STABLE_TRACKERS.forEach((tr) => {
+      const trParam = `tr=${encodeURIComponent(tr)}`;
+      if (!magnetBase.includes(trParam) && !magnetBase.includes(encodeURIComponent(tr))) {
+        magnetBase += `&${trParam}`;
+      }
+    });
+
+    const magnetConWallet = `${magnetBase}&xl=creator_wallet=${currentWallet}`;
     const magnetInput = document.getElementById("generated-magnet");
+
     console.info(`✅ [Torrent Creado] InfoHash: ${torrent.infoHash}`);
-    console.log(`🔗 Magnet con Creador Anexado: ${magnetConWallet}`);
+    console.log(`🔗 Magnet con Creador y Trackers Anexados: ${magnetConWallet}`);
 
     if (magnetInput) {
       magnetInput.value = magnetConWallet;

@@ -1,14 +1,16 @@
 // ============================================================
-// MANEJADOR DE MENÚ CONTEXTUAL (CLIC DERECHO EN TABLA TORRENTS)
+// MANEJADOR DE MENÚ CONTEXTUAL Y DELEGACIÓN GLOBAL DE EVENTOS
 // ============================================================
 
-// Hash del torrent actualmente inspeccionado con clic derecho
-let selectedInfoHashContext = null;
+window.selectedInfoHashContext = null;
 
-// Renderizar y posicionar menú en las coordenadas X, Y del cursor
 function mostrarContextMenu(event, infoHash) {
-  event.preventDefault(); // Bloquear menú predeterminado del navegador
-  selectedInfoHashContext = infoHash;
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  
+  window.selectedInfoHashContext = infoHash;
 
   const menu = document.getElementById("torrent-context-menu");
   if (!menu) {
@@ -16,175 +18,141 @@ function mostrarContextMenu(event, infoHash) {
     return;
   }
 
-  // Coordenadas del evento del ratón
-  const mouseX = event.clientX;
-  const mouseY = event.clientY;
+  // Coordenadas con prevención de colisión en bordes de pantalla
+  const menuWidth = 240;
+  const menuHeight = 320;
+  const clientX = event ? event.clientX : 100;
+  const clientY = event ? event.clientY : 100;
 
-  menu.style.left = `${mouseX}px`;
-  menu.style.top = `${mouseY}px`;
+  const posX = clientX + menuWidth > window.innerWidth ? window.innerWidth - menuWidth - 10 : clientX;
+  const posY = clientY + menuHeight > window.innerHeight ? window.innerHeight - menuHeight - 10 : clientY;
+
+  menu.style.left = `${Math.max(10, posX)}px`;
+  menu.style.top = `${Math.max(10, posY)}px`;
   menu.classList.remove("hidden");
-  
-  console.log(`🖱️ [Menú Contextual] Abierto para InfoHash: ${infoHash} en (${mouseX}px, ${mouseY}px)`);
+
+  console.log(`🖱️ [Menú Contextual] Abierto para InfoHash: ${infoHash} en (${posX}px, ${posY}px)`);
 }
 
-// Ocultar menú automáticamente al hacer clic en cualquier otra parte de la pantalla
-document.addEventListener("click", (e) => {
+function ocultarContextMenu() {
   const menu = document.getElementById("torrent-context-menu");
-  if (menu && !menu.contains(e.target)) {
+  if (menu && !menu.classList.contains("hidden")) {
     menu.classList.add("hidden");
+  }
+}
+
+// DELEGACIÓN GLOBAL: Escucha el clic derecho en toda la ventana para capturar filas dinámicas
+document.addEventListener("contextmenu", (event) => {
+  // Buscar si el objetivo del clic pertenece a una fila de torrent
+  const path = event.composedPath ? event.composedPath() : [];
+  let row = path.find(el => el.tagName === "TR" && el.id && el.id.startsWith("row-"));
+
+  if (!row) {
+    row = event.target.closest("tr[id^='row-']");
+  }
+
+  if (row) {
+    event.preventDefault();
+    const infoHash = row.id.replace("row-", "");
+    mostrarContextMenu(event, infoHash);
   }
 });
 
-// Orquestador de acciones seleccionadas
-function ejecutarAccionContextMenu(accion) {
-  const infoHash = selectedInfoHashContext;
+// Cierre automático al hacer clic en cualquier lugar o presionar Escape
+document.addEventListener("click", (e) => {
   const menu = document.getElementById("torrent-context-menu");
-  if (menu) menu.classList.add("hidden");
+  if (menu && !menu.contains(e.target)) {
+    ocultarContextMenu();
+  }
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") ocultarContextMenu();
+});
+
+function ejecutarAccionContextMenu(accion) {
+  const infoHash = window.selectedInfoHashContext;
+  ocultarContextMenu();
 
   if (!infoHash) {
-    console.warn("⚠️ No hay ningún torrent seleccionado para ejecutar la acción.");
+    console.warn("⚠️ No hay torrent seleccionado.");
     return;
   }
 
-  console.log(`⚙️ [Acción Contextual] Ejecutando '${accion}' para InfoHash: ${infoHash}`);
+  console.log(`⚙️ [Acción Contextual] Executing '${accion}' para: ${infoHash}`);
 
   switch (accion) {
-    // ------------------------------------------------------------
-    // 1. REPRODUCCIÓN Y GESTIÓN DE ARCHIVOS
-    // ------------------------------------------------------------
     case 'reproducir':
-      if (typeof window.reproducirTorrent === 'function') {
-        window.reproducirTorrent(infoHash);
-      } else {
-        console.error("Función reproducirTorrent no disponible en webtorrent.js");
-      }
+      if (typeof window.reproducirTorrent === 'function') window.reproducirTorrent(infoHash);
       break;
 
     case 'guardar_archivo':
       if (typeof window.descargarArchivoTorrent === 'function') {
         window.descargarArchivoTorrent(infoHash);
       } else {
-        const torrentFile = window.wtClient?.get(infoHash);
-        if (torrentFile && torrentFile.files.length) {
-          torrentFile.files[0].getBlobURL((err, url) => {
-            if (err) return alert("Error al generar enlace de descarga.");
+        const tFile = window.wtClient?.get(infoHash);
+        if (tFile && tFile.files.length) {
+          tFile.files[0].getBlobURL((err, url) => {
+            if (err) return alert("Error al generar descarga.");
             const a = document.createElement('a');
             a.href = url;
-            a.download = torrentFile.files[0].name;
+            a.download = tFile.files[0].name;
+            document.body.appendChild(a);
             a.click();
+            a.remove();
           });
-        } else {
-          alert("No se pudo obtener el archivo del torrent para descarga.");
         }
       }
       break;
 
     case 'compartir':
-      if (typeof window.copiarMagnetByHash === 'function') {
-        window.copiarMagnetByHash(infoHash);
-      } else {
-        console.error("Función copiarMagnetByHash no disponible en webtorrent.js");
+      const torrentObj = window.wtClient?.get(infoHash);
+      if (torrentObj && torrentObj.magnetURI) {
+        let currentWallet = window.appState?.myWallet || localStorage.getItem("nanflix_wallet") || "";
+        const magnetFinal = torrentObj.magnetURI.includes("creator_wallet")
+          ? torrentObj.magnetURI
+          : `${torrentObj.magnetURI}&xl=creator_wallet=${currentWallet}`;
+        
+        navigator.clipboard.writeText(magnetFinal).then(() => alert("📋 Magnet Link copiado."));
       }
       break;
 
     case 'copiar_infohash':
-      navigator.clipboard.writeText(infoHash);
-      alert(`📋 InfoHash copiado al portapapeles:\n${infoHash}`);
+      navigator.clipboard.writeText(infoHash).then(() => alert(`📋 InfoHash: ${infoHash}`));
       break;
 
-    // ------------------------------------------------------------
-    // 2. CONTROL DE RED, TRACKERS Y SEEDING
-    // ------------------------------------------------------------
     case 'pausar':
-      if (typeof window.pausarTorrent === 'function') {
-        window.pausarTorrent(infoHash);
-      } else {
-        console.error("Función pausarTorrent no disponible en webtorrent.js");
-      }
+      if (typeof window.pausarTorrent === 'function') window.pausarTorrent(infoHash);
       break;
 
     case 'reanudar':
-      if (typeof window.reanudarTorrent === 'function') {
-        window.reanudarTorrent(infoHash);
-      } else {
-        console.error("Función reanudarTorrent no disponible en webtorrent.js");
-      }
+      if (typeof window.reanudarTorrent === 'function') window.reanudarTorrent(infoHash);
       break;
 
-    case 'detener':
-      if (typeof window.detenerTorrent === 'function') {
-        window.detenerTorrent(infoHash);
-      } else {
-        console.error("Función detenerTorrent no disponible en webtorrent.js");
-      }
-      break;
-
-   // Reemplaza el bloque 'case reannounce' en opciones-der.js
-case 'reannounce':
-  if (typeof window.reannounceTorrent === 'function') {
-    window.reannounceTorrent(infoHash);
-  } else {
-    const torrentAnnounce = window.wtClient?.get(infoHash);
-    if (torrentAnnounce) {
-      try {
-        // En versiones modernas de WebTorrent, el método announce se invoca sobre el discovery o torrent directo
-        if (typeof torrentAnnounce.announce === 'function') {
-          torrentAnnounce.announce();
-        } else if (torrentAnnounce.discovery && torrentAnnounce.discovery.tracker) {
-          // Fallback seguro iterando la lista interna de trackers
-          const trackers = torrentAnnounce.discovery.tracker.trackers || [];
-          trackers.forEach(t => {
-            if (typeof t.announce === 'function') t.announce();
-          });
-        }
-        console.log(`🔄 Re-announce enviado exitosamente para: ${infoHash}`);
-        alert("🔄 Re-announce enviado a los trackers WebRTC.");
-      } catch (err) {
-        console.warn("⚠️ No se pudo forzar re-announce manual:", err.message);
-      }
-    } else {
-      alert("⚠️ Torrent no encontrado en la sesión actual.");
-    }
-  }
-  break;
-
-    // ------------------------------------------------------------
-    // 3. FUNCIONES AVANZADAS & NANO ON-CHAIN
-    // ------------------------------------------------------------
     case 'ver_vale_nano':
-      if (typeof window.cambiarTabDetalle === 'function') {
-        window.cambiarTabDetalle('liquidaciones');
-      }
+      if (typeof window.seleccionarTorrentTabla === 'function') window.seleccionarTorrentTabla(infoHash);
+      if (typeof window.cambiarTabDetalle === 'function') window.cambiarTabDetalle('liquidaciones');
       break;
 
     case 'ver_creador':
-      const torrentPeer = window.wtClient?.get(infoHash);
-      if (torrentPeer) {
-        const creatorWallet = Array.from(window.peerWallets.values())[0] || "No detectado en Magnet";
-        alert(`👤 Billetera Nano del Creador / Peer:\n\n${creatorWallet}`);
-      } else {
-        alert("Torrent no activo en el cliente actual.");
+      const peersMap = window.torrentPeerWallets?.get(infoHash);
+      let creatorWallet = peersMap?.get("creator")?.wallet;
+      if (!creatorWallet && window.wtClient?.get(infoHash)?.magnetURI) {
+        const match = window.wtClient.get(infoHash).magnetURI.match(/creator_wallet=(nano_[13][a-km-zA-HJ-NP-Z0-9]{59})/);
+        if (match) creatorWallet = match[1];
       }
+      alert(`👤 Billetera Autor:\n\n${creatorWallet || "No detectada aún"}`);
       break;
 
-    // ------------------------------------------------------------
-    // 4. ELIMINACIÓN DE SESIÓN
-    // ------------------------------------------------------------
     case 'eliminar':
-      if (confirm("¿Estás seguro de que deseas eliminar este torrent de la sesión?")) {
-        if (typeof window.eliminarTorrent === 'function') {
-          window.eliminarTorrent(infoHash);
-        } else {
-          console.error("Función eliminarTorrent no disponible en webtorrent.js");
-        }
+      if (confirm("¿Eliminar este torrent de la sesión?")) {
+        if (typeof window.eliminarTorrent === 'function') window.eliminarTorrent(infoHash);
       }
       break;
-
-    default:
-      console.warn(`Opción desconocida: ${accion}`);
   }
 }
 
-// Exposición en el objeto global (window)
+// Exposición global
 window.mostrarContextMenu = mostrarContextMenu;
+window.ocultarContextMenu = ocultarContextMenu;
 window.ejecutarAccionContextMenu = ejecutarAccionContextMenu;
