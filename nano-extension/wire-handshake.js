@@ -4,6 +4,9 @@
 
 const torrentPeerWallets = new Map();
 
+/**
+ * Convierte un Peer ID (Buffer, Uint8Array o String) a representación Hex/String limpia.
+ */
 function obtenerPeerIdString(peerId) {
   if (!peerId) return "";
   if (typeof peerId === "string") return peerId;
@@ -13,17 +16,33 @@ function obtenerPeerIdString(peerId) {
   return String(peerId);
 }
 
+// Throttling global para la tabla de peers
+let renderPeersScheduled = false;
+function programarRenderTablaPeers() {
+  if (renderPeersScheduled) return;
+  renderPeersScheduled = true;
+  requestAnimationFrame(() => {
+    if (typeof window.renderizarTablaPeers === "function") {
+      window.renderizarTablaPeers();
+    }
+    renderPeersScheduled = false;
+  });
+}
+
+/**
+ * Registra o actualiza la wallet Nano asociada a un peer en la memoria local.
+ */
 function registrarWalletPeer(infoHash, rawPeerId, wallet, piezas = 0) {
   if (!infoHash || !rawPeerId || !wallet) return;
 
   const peerId = obtenerPeerIdString(rawPeerId);
   const walletLimpia = String(wallet).trim().toLowerCase();
-  const esWalletNano = walletLimpia.startsWith("nano_");
+  const esWalletNano = walletLimpia.startsWith("nano_") || walletLimpia.startsWith("xrb_");
 
   if (esWalletNano) {
     const esValida = typeof window.validarBeneficiarioEstricto === "function"
       ? window.validarBeneficiarioEstricto(walletLimpia)
-      : /^nano_[13][13456789abcdefghijkmnopqrstuwxyz]{59}$/.test(walletLimpia);
+      : /^(nano|xrb)_[13][13456789abcdefghijkmnopqrstuwxyz]{59}$/.test(walletLimpia);
     if (!esValida) return;
   }
 
@@ -35,37 +54,37 @@ function registrarWalletPeer(infoHash, rawPeerId, wallet, piezas = 0) {
   const datosPrevios = mapaTorrent.get(peerId);
   const piezasTotales = piezas > 0 ? piezas : (datosPrevios ? datosPrevios.piezas : 0);
 
-  // Escudo protector: Nunca reemplazar una billetera "nano_" válida con un texto de estado
+  // Escudo protector: Preservar wallet Nano válida si entra un estado temporal
   let walletAGuardar = walletLimpia;
-  if (datosPrevios && datosPrevios.wallet && datosPrevios.wallet.startsWith("nano_") && !esWalletNano) {
+  if (datosPrevios && datosPrevios.wallet && (datosPrevios.wallet.startsWith("nano_") || datosPrevios.wallet.startsWith("xrb_")) && !esWalletNano) {
     walletAGuardar = datosPrevios.wallet;
   }
 
-  // Evaluar si es un peer o billetera totalmente nueva
   const esNuevaWallet = !datosPrevios || datosPrevios.wallet !== walletAGuardar;
   const hubocambioPiezas = datosPrevios && datosPrevios.piezas !== piezasTotales;
 
   if (esNuevaWallet || hubocambioPiezas) {
     mapaTorrent.set(peerId, { wallet: walletAGuardar, piezas: piezasTotales });
-    
-    // Loguear ÚNICAMENTE si la billetera fue vinculada por primera vez o si cambió
+
     if (esNuevaWallet && esWalletNano) {
       console.info(`✅ [Peer Vinculado] Torrent: ${infoHash.substring(0, 8)}... | Peer: ${peerId.substring(0, 10)}... -> Wallet: ${walletAGuardar}`);
     }
 
-    if (typeof window.renderizarTablaPeers === "function") {
-      window.renderizarTablaPeers();
-    }
+    programarRenderTablaPeers();
   }
 }
+
+/**
+ * Clase de extensión BEP 10 para intercambio de wallets Nano.
+ */
 class NanoHandshakeExtension {
   constructor(wire) {
     this._wire = wire;
-    this._infoHash = null; // Almacenamiento local anti-fallos
+    this._infoHash = null;
   }
 
   onHandshake(infoHash, peerId, extensions) {
-    this._infoHash = infoHash; // Capturamos el hash directo desde el motor BEP-10
+    this._infoHash = infoHash;
     console.log(`🌐 [Nano Extension] Handshake inicial con Peer: ${obtenerPeerIdString(peerId)}`);
   }
 
@@ -96,18 +115,22 @@ class NanoHandshakeExtension {
       const payload = JSON.stringify({ wallet: myWallet });
       const buffer = (typeof Buffer !== "undefined") ? Buffer.from(payload) : new TextEncoder().encode(payload);
       this._wire.extended("nano_handshake", buffer);
-    } catch (err) {}
+    } catch (err) {
+      console.error("Error enviando payload de wallet sobre wire:", err);
+    }
   }
 
   _interpretarPayload(payload) {
     try {
       if (!payload) return;
-      let rawStr = (payload instanceof Uint8Array || (typeof Buffer !== 'undefined' && Buffer.isBuffer(payload))) 
-        ? new TextDecoder().decode(payload) 
+      let rawStr = (payload instanceof Uint8Array || (typeof Buffer !== 'undefined' && Buffer.isBuffer(payload)))
+        ? new TextDecoder().decode(payload)
         : String(payload);
-      
+
       const matchJSON = rawStr.match(/\{[\s\S]*\}/);
-      let walletExtraida = matchJSON ? JSON.parse(matchJSON[0]).wallet : (rawStr.trim().startsWith("nano_") ? rawStr.trim() : null);
+      let walletExtraida = matchJSON 
+        ? JSON.parse(matchJSON[0]).wallet 
+        : ((rawStr.trim().startsWith("nano_") || rawStr.trim().startsWith("xrb_")) ? rawStr.trim() : null);
 
       if (walletExtraida) {
         this._procesarWalletEntrante(walletExtraida);
@@ -117,11 +140,10 @@ class NanoHandshakeExtension {
 
   _procesarWalletEntrante(wallet) {
     const walletStr = String(wallet).trim();
-    if (!walletStr.startsWith("nano_")) return;
+    if (!walletStr.startsWith("nano_") && !walletStr.startsWith("xrb_")) return;
 
-    // Uso de _infoHash como fuente principal de verdad
     const targetInfoHash = this._infoHash || (this._wire.torrent ? this._wire.torrent.infoHash : null);
-    
+
     if (targetInfoHash && this._wire.peerId) {
       registrarWalletPeer(targetInfoHash, this._wire.peerId, walletStr, 0);
     }
@@ -129,68 +151,56 @@ class NanoHandshakeExtension {
 }
 NanoHandshakeExtension.prototype.name = "nano_handshake";
 
+/**
+ * Registra la extensión Nano Wire en una conexión peer activa.
+ */
 function registrarNanoExtension(wire) {
   if (!wire) return;
 
   try {
     if (typeof NanoHandshakeExtension === "function") wire.use(NanoHandshakeExtension);
     if (typeof window.NanoPaymentExtension === "function") wire.use(window.NanoPaymentExtension);
-  } catch (err) {}
+  } catch (err) {
+    console.error("Error registrando extensión Nano en Wire:", err);
+  }
 
   const enviarPing = () => {
     const myWallet = window.appState?.myWallet || localStorage.getItem("nanflix_wallet");
-    if (!myWallet || typeof wire.extended !== "function") return;
-    
+    if (!myWallet || wire.destroyed || typeof wire.extended !== "function") return;
+
     try {
       const payload = JSON.stringify({ wallet: myWallet });
       const buffer = (typeof Buffer !== "undefined") ? Buffer.from(payload) : new TextEncoder().encode(payload);
       wire.extended("nano_handshake", buffer);
-      wire.extended(1, buffer);
     } catch (e) {}
   };
 
-  // Cadencia agresiva para garantizar penetración en redes lentas
+  // Cadencia inicial para estabilizar handshakes en redes lentas
   enviarPing();
-  setTimeout(enviarPing, 1000);
-  setTimeout(enviarPing, 3000);
-  setTimeout(enviarPing, 7000);
+  const timer1 = setTimeout(enviarPing, 1000);
+  const timer2 = setTimeout(enviarPing, 3000);
 
   const intervalId = setInterval(() => {
     if (wire.destroyed) {
-      clearInterval(intervalId);
+      limpiarTimers();
       return;
     }
     enviarPing();
   }, 5000);
 
-  wire.on("close", () => clearInterval(intervalId));
+  const limpiarTimers = () => {
+    clearTimeout(timer1);
+    clearTimeout(timer2);
+    clearInterval(intervalId);
+  };
 
+  wire.on("close", limpiarTimers);
+  wire.on("error", limpiarTimers);
+  wire.on("end", limpiarTimers);
+
+  // Listener para extensiones de pago y notificaciones personalizadas
   wire.on("extended", (ext, payload) => {
-    if (ext === "nano_handshake" || ext === 1) {
-      try {
-        let rawStr = (payload instanceof Uint8Array || (typeof Buffer !== 'undefined' && Buffer.isBuffer(payload))) 
-          ? new TextDecoder().decode(payload) 
-          : String(payload);
-          
-        const matchJSON = rawStr.match(/\{[\s\S]*\}/);
-        let walletExtraida = matchJSON ? JSON.parse(matchJSON[0]).wallet : (rawStr.trim().startsWith("nano_") ? rawStr.trim() : null);
-
-        if (walletExtraida && walletExtraida.startsWith("nano_")) {
-           let targetInfoHash = wire.torrent ? wire.torrent.infoHash : null;
-           
-           // Si wire.torrent es nulo, extraemos el infoHash desde la instancia de la clase
-           if (!targetInfoHash && wire.extensions && wire.extensions.nano_handshake) {
-             targetInfoHash = wire.extensions.nano_handshake._infoHash;
-           }
-
-           if (targetInfoHash) {
-             registrarWalletPeer(targetInfoHash, wire.peerId, walletExtraida, 0);
-           }
-        }
-      } catch (e) {}
-    }
-
-    if ((ext === "nano_payment" || ext === 2) && typeof window.procesarNotificacionPago === "function") {
+    if ((ext === "nano_payment" || ext === "nano_payment_notification") && typeof window.procesarNotificacionPago === "function") {
       window.procesarNotificacionPago(payload);
     }
   });
