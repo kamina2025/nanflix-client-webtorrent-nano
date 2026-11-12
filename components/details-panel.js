@@ -55,7 +55,7 @@ class NanflixDetailsPanel extends HTMLElement {
                     </div>
                     <div class="bg-slate-950 p-2.5 rounded border border-rose-900/40 bg-rose-950/10">
                         <span class="text-slate-400 block text-[10px] uppercase tracking-wider">💸 Gastos (A Liquidar)</span>
-                        <span id="stat-gastos-xno" class="text-base font-bold text-rose-400">0.000000 XNO</span>
+                        <span id="stat-gastos-xno" class="text-base font-bold text-rose-400">0.0000000000 XNO</span>
                     </div>
 
                     <!-- Enviados (Ingresos) -->
@@ -65,7 +65,7 @@ class NanflixDetailsPanel extends HTMLElement {
                     </div>
                     <div class="bg-slate-950 p-2.5 rounded border border-emerald-900/40 bg-emerald-950/10">
                         <span class="text-slate-400 block text-[10px] uppercase tracking-wider">💰 Ingresos (Generados)</span>
-                        <span id="stat-ingresos-xno" class="text-base font-bold text-emerald-400">0.000000 XNO</span>
+                        <span id="stat-ingresos-xno" class="text-base font-bold text-emerald-400">0.0000000000 XNO</span>
                     </div>
                 </div>
 
@@ -123,6 +123,13 @@ class NanflixDetailsPanel extends HTMLElement {
     this.bindEvents();
     this._initialized = true;
     console.log("✅ [NanFlix UI] NanflixDetailsPanel inicializado y listo en el DOM.");
+  }
+
+  disconnectedCallback() {
+    if (this._batchTimer) {
+      clearTimeout(this._batchTimer);
+      this._batchTimer = null;
+    }
   }
 
   _cacheDOMReferences() {
@@ -204,8 +211,8 @@ class NanflixDetailsPanel extends HTMLElement {
   }
 
   /**
-   * Actualiza las estadísticas contables agrupando llamadas en memoria cada 250 ms
-   * para reducir significativamente la carga de CPU durante transferencias P2P continuas.
+   * Actualiza las estadísticas contables agrupando llamadas en memoria cada 250 ms.
+   * Precisión ajustada a 10 decimales para tarifas Nano de micropagos (1e-10 XNO).
    */
   actualizarLiquidaciones(chunksRecibidos = 0, gastosXNO = 0, chunksEnviados = 0, ingresosXNO = 0) {
     if (typeof chunksRecibidos === 'object' && chunksRecibidos !== null) {
@@ -227,9 +234,9 @@ class NanflixDetailsPanel extends HTMLElement {
       const { recibidos, gastos, enviados, ingresos } = this._pendingStats;
 
       if (this._elRecibidos) this._elRecibidos.textContent = `${recibidos.toFixed(0)} chunks`;
-      if (this._elGastos) this._elGastos.textContent = `${gastos.toFixed(6)} XNO`;
+      if (this._elGastos) this._elGastos.textContent = `${gastos.toFixed(10)} XNO`;
       if (this._elEnviados) this._elEnviados.textContent = `${enviados.toFixed(0)} chunks`;
-      if (this._elIngresos) this._elIngresos.textContent = `${ingresos.toFixed(6)} XNO`;
+      if (this._elIngresos) this._elIngresos.textContent = `${ingresos.toFixed(10)} XNO`;
 
       this._batchTimer = null;
     }, 250);

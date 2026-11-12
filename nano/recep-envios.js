@@ -9,6 +9,7 @@ const ALLOWED_RPC_ENDPOINTS = [
 ];
 
 const DEFAULT_WS_ENDPOINT = "wss://ws.nano.to";
+const WIRE_CHUNK_SIZE = 16384; // 16 KB (Bloque P2P estándar NanFlix)
 
 /**
  * Obtiene la semilla Nano descifrada en memoria mediante WebCrypto (AES-GCM + PBKDF2)
@@ -223,7 +224,7 @@ async function enviarMicropagoReal(destinatario, montoXNO, passphrase = "") {
     console.error("❌ Error en enviarMicropagoReal:", error);
     throw error;
   } finally {
-    privateKey = null;
+    privateKey = null; // Limpieza estricta de la clave privada en memoria
   }
 }
 
@@ -391,30 +392,48 @@ async function ejecutarLiquidacionOnChain(infoHashTarget = null) {
 
   const mapaPeers = window.torrentPeerWallets.get(infoHashTarget);
   const walletPiezasMap = new Map();
-  let totalPiezasConWallet = 0;
+  let totalBloquesConWallet = 0;
   let creatorWallet = null;
 
+  // 1. Normalización y agrupación de transferencias por Wallet (Bloques de 16 KB / MB)
   for (const [peerId, data] of mapaPeers.entries()) {
     let posibleWallet = typeof data === "object" ? (data.wallet || data.nanoWallet || "") : data;
     posibleWallet = String(posibleWallet).trim();
-    const piezas = (typeof data === "object" && data.piezas) ? Number(data.piezas) : 0;
 
-    if (peerId === "creator" && posibleWallet) {
-      creatorWallet = posibleWallet;
+    let bloques16KB = 0;
+    let bytesTransferidos = 0;
+
+    if (typeof data === "object") {
+      if (data.bytes) {
+        bytesTransferidos = Number(data.bytes) || 0;
+        bloques16KB = Math.floor(bytesTransferidos / WIRE_CHUNK_SIZE);
+      } else if (data.piezas) {
+        const valPiezas = Number(data.piezas) || 0;
+        // Si viene en MB flotante o recuento, convertimos a bytes y a bloques enteros de 16 KB
+        bytesTransferidos = (!Number.isInteger(valPiezas) || valPiezas > 1000)
+          ? Math.round(valPiezas * 1024 * 1024)
+          : valPiezas * WIRE_CHUNK_SIZE;
+        bloques16KB = Math.floor(bytesTransferidos / WIRE_CHUNK_SIZE);
+      }
     }
 
     const esValida = typeof window.validarDireccionNano === "function" 
       ? window.validarDireccionNano(posibleWallet)
       : (posibleWallet.startsWith("nano_") || posibleWallet.startsWith("xrb_"));
 
+    if (peerId === "creator" && posibleWallet && esValida) {
+      creatorWallet = posibleWallet;
+    }
+
     if (posibleWallet && esValida) {
       if (!walletPiezasMap.has(posibleWallet)) {
-        walletPiezasMap.set(posibleWallet, { piezas: 0, peerIds: [] });
+        walletPiezasMap.set(posibleWallet, { bloques: 0, bytes: 0, peerIds: [] });
       }
       const entry = walletPiezasMap.get(posibleWallet);
-      entry.piezas += piezas;
+      entry.bloques += bloques16KB;
+      entry.bytes += bytesTransferidos;
       entry.peerIds.push(peerId);
-      totalPiezasConWallet += piezas;
+      totalBloquesConWallet += bloques16KB;
     }
   }
 
@@ -422,12 +441,14 @@ async function ejecutarLiquidacionOnChain(infoHashTarget = null) {
     creatorWallet = window.appState.creatoresWallets[infoHashTarget];
   }
 
+  // 2. Construcción de beneficiarios
   const beneficiarios = [];
   walletPiezasMap.forEach((info, wallet) => {
-    if (info.piezas > 0 || wallet === creatorWallet) {
+    if (info.bloques > 0 || wallet === creatorWallet) {
       beneficiarios.push({
         wallet: wallet,
-        piezas: info.piezas,
+        bloques: info.bloques,
+        mb: (info.bytes / (1024 * 1024)).toFixed(2),
         peerIdLabel: info.peerIds[0] || "peer"
       });
     }
@@ -438,14 +459,15 @@ async function ejecutarLiquidacionOnChain(infoHashTarget = null) {
     return;
   }
 
+  // 3. Formatear la confirmación eliminando la ambigüedad entre piezas y MB
   let resumenPagos = `⚠️ CONFIRMACIÓN DE LIQUIDACIÓN MULTI-PEER ON-CHAIN ⚠️\n\n`;
   resumenPagos += `Monto Total a Liquidar: ${montoTotalAcumulado.toFixed(6)} XNO\n`;
   resumenPagos += `Direcciones Destino: ${beneficiarios.length}\n\nDesglose de Pago:\n`;
 
   const listaPagosCalculados = beneficiarios.map(b => {
     let proporcion = 0;
-    if (totalPiezasConWallet > 0) {
-      proporcion = b.piezas / totalPiezasConWallet;
+    if (totalBloquesConWallet > 0) {
+      proporcion = b.bloques / totalBloquesConWallet;
     } else if (b.wallet === creatorWallet) {
       proporcion = 1;
     } else {
@@ -453,7 +475,9 @@ async function ejecutarLiquidacionOnChain(infoHashTarget = null) {
     }
 
     const montoPeer = montoTotalAcumulado * proporcion;
-    resumenPagos += `• ${b.peerIdLabel.substring(0, 10)}... (${b.wallet.substring(0, 14)}...): ${montoPeer.toFixed(6)} XNO (${b.piezas.toFixed(2)} piezas)\n`;
+    const labelPeer = b.peerIdLabel === "creator" ? "Creador" : `Peer ${b.peerIdLabel.substring(0, 8)}...`;
+
+    resumenPagos += `- ${labelPeer} (${b.wallet.substring(0, 12)}...): ${montoPeer.toFixed(6)} XNO (${b.bloques.toLocaleString()} bloques / ${b.mb} MB)\n`;
 
     return {
       wallet: b.wallet,
@@ -466,6 +490,7 @@ async function ejecutarLiquidacionOnChain(infoHashTarget = null) {
 
   if (!confirm(resumenPagos)) return;
 
+  // 4. Bucle de envío On-Chain y notificación P2P
   let pagosExitosos = 0;
   const hashesResultado = [];
   const passphrase = window.appState?.passphrase || "";
@@ -501,6 +526,7 @@ async function ejecutarLiquidacionOnChain(infoHashTarget = null) {
     }
   }
 
+  // 5. Limpieza contable y actualización visual
   if (pagosExitosos > 0) {
     if (infoHashTarget && db[infoHashTarget]) {
       db[infoHashTarget].gastoTotal = 0;

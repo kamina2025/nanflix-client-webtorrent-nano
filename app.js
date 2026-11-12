@@ -1,9 +1,10 @@
 // ============================================================
-// CICLO DE VIDA & ORQUESTACIÓN DE APLICACIÓN (APP.JS) - REFACTORIZADO
+// CICLO DE VIDA & ORQUESTACIÓN DE APLICACIÓN (APP.JS) - AUDITADO Y CORREGIDO
 // ============================================================
 
 // 1. Estado Global P2P y Liquidaciones Nano en Memoria (Raw / BigInt)
-const RAW_POR_PIEZA = 1000000000000000000000000n; // 0.000001 XNO en RAW (1e24)
+// 0.0000000001 XNO en RAW = 10^-10 * 10^30 = 1e20 RAW (100000000000000000000n)
+const RAW_POR_PIEZA = 100000000000000000000n; 
 
 window.appState = window.appState || {
   myWallet: localStorage.getItem("nanflix_wallet") || null
@@ -24,6 +25,8 @@ document.addEventListener("DOMContentLoaded", () => {
     window.cargarSeedLocal();
   }
 
+  // Restaurar métricas acumuladas desde la BD local si existen
+  hidratarEstadisticasDesdeBD();
   registrarServiceWorker();
   actualizarMetricasLiquidacion();
 });
@@ -39,24 +42,59 @@ function registrarServiceWorker() {
 }
 
 /**
+ * Reconstruye el estado p2pStats a partir de la BD local guardada en localStorage
+ */
+function hidratarEstadisticasDesdeBD() {
+  if (typeof window.obtenerBDTorrents !== "function") return;
+
+  try {
+    const db = window.obtenerBDTorrents();
+    let acumuladoRecibidos = 0;
+    let acumuladoEnviados = 0;
+    let acumuladoGastosRaw = 0n;
+    let acumuladoIngresosRaw = 0n;
+
+    Object.values(db).forEach((item) => {
+      if (!item) return;
+      if (item.piezasRecibidas) acumuladoRecibidos += Number(item.piezasRecibidas) || 0;
+      if (item.piezasEnviadas) acumuladoEnviados += Number(item.piezasEnviadas) || 0;
+      if (item.gastoRaw) acumuladoGastosRaw += BigInt(item.gastoRaw || "0");
+      if (item.gananciaRaw) acumuladoIngresosRaw += BigInt(item.gananciaRaw || "0");
+    });
+
+    window.p2pStats.chunksRecibidos = acumuladoRecibidos;
+    window.p2pStats.chunksEnviados = acumuladoEnviados;
+    window.p2pStats.gastosRaw = acumuladoGastosRaw;
+    window.p2pStats.ingresosRaw = acumuladoIngresosRaw;
+
+    console.log("📊 [NanFlix App] Métricas restauradas desde almacenamiento local.");
+  } catch (err) {
+    console.warn("⚠️ [NanFlix App] No se pudo hidratar p2pStats desde la BD:", err);
+  }
+}
+
+/**
  * 4. Registra cada bloque P2P transferido (Upload / Download) segregando
  *    chunks e ingresos/gastos en BigInt para evitar deriva flotante.
  */
 function registrarTransaccionP2P(infoHash, tipo, piezas) {
   const numPiezas = Number(piezas) || 0;
+  
+  // Guardián contra deltas nulos o flotantes inválidos
   if (numPiezas <= 0) return;
 
-  // Conversión segura a Raw BigInt manteniendo precisión decimal
-  const incrementoRaw = (RAW_POR_PIEZA * BigInt(Math.round(numPiezas * 1000))) / 1000n;
+  const piezasEscaladas = BigInt(Math.round(numPiezas * 1000));
 
   if (tipo === "upload") {
-    // CREADOR / SEEDER: Incrementar Chunks Enviados e Ingresos
+    // SEEDER: Incrementar Chunks Enviados e Ingresos con el factor 0.6 (60%)
+    const deltaRaw = (RAW_POR_PIEZA * piezasEscaladas * 6n) / 10000n;
     window.p2pStats.chunksEnviados += numPiezas;
-    window.p2pStats.ingresosRaw += incrementoRaw;
+    window.p2pStats.ingresosRaw += deltaRaw;
   } else if (tipo === "download") {
-    // ESPECTADOR / LEECHER: Incrementar Chunks Recibidos y Gastos
+    // LEECHER: Incrementar Chunks Recibidos y Gastos al 100%
+    const deltaRaw = (RAW_POR_PIEZA * piezasEscaladas) / 1000n;
     window.p2pStats.chunksRecibidos += numPiezas;
-    window.p2pStats.gastosRaw += incrementoRaw;
+    window.p2pStats.gastosRaw += deltaRaw;
   }
 
   actualizarMetricasLiquidacion();
@@ -69,7 +107,7 @@ function registrarTransaccionP2P(infoHash, tipo, piezas) {
 function actualizarMetricasLiquidacion() {
   const panelComponent = document.querySelector("nanflix-details-panel");
 
-  // Conversión de Raw BigInt a float XNO formateado
+  // Conversión de Raw BigInt a float XNO formateado (1 XNO = 1e30 Raw)
   const gastosXNO = Number(window.p2pStats.gastosRaw) / 1e30;
   const ingresosXNO = Number(window.p2pStats.ingresosRaw) / 1e30;
 
@@ -89,9 +127,9 @@ function actualizarMetricasLiquidacion() {
     const elIngresos = document.getElementById("stat-ingresos-xno");
 
     if (elRecibidos) elRecibidos.innerText = `${window.p2pStats.chunksRecibidos.toFixed(0)} chunks`;
-    if (elGastos) elGastos.innerText = `${gastosXNO.toFixed(6)} XNO`;
+    if (elGastos) elGastos.innerText = `${gastosXNO.toFixed(10)} XNO`;
     if (elEnviados) elEnviados.innerText = `${window.p2pStats.chunksEnviados.toFixed(0)} chunks`;
-    if (elIngresos) elIngresos.innerText = `${ingresosXNO.toFixed(6)} XNO`;
+    if (elIngresos) elIngresos.innerText = `${ingresosXNO.toFixed(10)} XNO`;
   }
 }
 
@@ -117,7 +155,8 @@ function registrarHandshakeLog(msg, tipo = "info") {
   }
 }
 
-// Exposición global
+// Exposición global limpia
 window.registrarTransaccionP2P = registrarTransaccionP2P;
 window.actualizarMetricasLiquidacion = actualizarMetricasLiquidacion;
 window.registrarHandshakeLog = registrarHandshakeLog;
+window.hidratarEstadisticasDesdeBD = hidratarEstadisticasDesdeBD;
