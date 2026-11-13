@@ -62,10 +62,10 @@ if (typeof window !== "undefined") {
 }
 
 /**
- * Registra transacciones P2P normalizadas a 10 decimales y Raw exacto.
- * Única fuente de verdad para gastoTotal, gananciaTotal y conteo de piezas.
+ * Persiste transacciones P2P por infoHash en Raw BigInt exacto
+ * y deriva los totales XNO a 10 decimales sin deriva IEEE-754.
  */
-function registrarTransaccionP2P(infoHash, tipo, piezas) {
+function registrarTransaccionBD(infoHash, tipo, piezas) {
   const numPiezas = Number(piezas) || 0;
   if (!infoHash || numPiezas <= 0) return null;
 
@@ -83,36 +83,36 @@ function registrarTransaccionP2P(infoHash, tipo, piezas) {
   }
 
   const registro = db[infoHash];
-  const precioPieza = window.PRICE_PER_PIECE;
-  const piezasEscaladas = BigInt(Math.round(numPiezas * 1000));
+  const piezasEscaladas = BigInt(Math.round(numPiezas * 1000000));
 
   if (tipo === "download") {
-    const costoXNO = numPiezas * precioPieza;
-    const deltaRaw = (window.RAW_POR_PIEZA * piezasEscaladas) / 1000n;
+    const deltaRaw = (window.RAW_POR_PIEZA * piezasEscaladas) / 1000000n;
+    const nuevoGastoRaw = BigInt(registro.gastoRaw || "0") + deltaRaw;
 
     registro.piezasRecibidas = (Number(registro.piezasRecibidas) || 0) + numPiezas;
-    registro.gastoTotal = Number(((Number(registro.gastoTotal) || 0) + costoXNO).toFixed(10));
-    registro.gastoRaw = (BigInt(registro.gastoRaw || "0") + deltaRaw).toString();
-
-    // Sincronizar estado global en memoria para UI y depuración
-    if (!window.appState) window.appState = {};
-    window.appState.chunksRecibidos = (Number(window.appState.chunksRecibidos) || 0) + numPiezas;
-    window.appState.montoAcumulado = Number(((Number(window.appState.montoAcumulado) || 0) + costoXNO).toFixed(10));
+    registro.gastoRaw = nuevoGastoRaw.toString();
+    registro.gastoTotal = Number((Number(nuevoGastoRaw) / 1e30).toFixed(10));
   } else if (tipo === "upload") {
     // Factor 0.6 (60% seeder, 40% creador/red)
-    const ingresoXNO = numPiezas * precioPieza * 0.6;
-    const deltaRaw = (window.RAW_POR_PIEZA * piezasEscaladas * 6n) / 10000n;
+    const deltaRaw = (window.RAW_POR_PIEZA * piezasEscaladas * 6n) / 10000000n;
+    const nuevaGananciaRaw = BigInt(registro.gananciaRaw || "0") + deltaRaw;
 
     registro.piezasEnviadas = (Number(registro.piezasEnviadas) || 0) + numPiezas;
-    registro.gananciaTotal = Number(((Number(registro.gananciaTotal) || 0) + ingresoXNO).toFixed(10));
-    registro.gananciaRaw = (BigInt(registro.gananciaRaw || "0") + deltaRaw).toString();
+    registro.gananciaRaw = nuevaGananciaRaw.toString();
+    registro.gananciaTotal = Number((Number(nuevaGananciaRaw) / 1e30).toFixed(10));
+  } else {
+    return registro;
   }
 
   guardarBDTorrents(db);
   return registro;
 }
 
-// Exposición global
+// Exposición global sin colisionar con la fachada de app.js
 window.obtenerBDTorrents = obtenerBDTorrents;
 window.guardarBDTorrents = guardarBDTorrents;
-window.registrarTransaccionP2P = registrarTransaccionP2P;
+window.registrarTransaccionBD = registrarTransaccionBD;
+
+if (typeof window.registrarTransaccionP2P !== "function") {
+  window.registrarTransaccionP2P = registrarTransaccionBD;
+}

@@ -87,38 +87,6 @@ function registrarActividadPeer(infoHash, rawPeerId, piezasIncremento) {
 window.registrarActividadPeer = registrarActividadPeer;
 
 /**
- * Despacha la transacción P2P hacia la persistencia local y hacia las estadísticas
- * globales en memoria sin importar el orden de carga entre app.js y base-de-datos.js.
- */
-function notificarContabilidadP2P(infoHash, tipo, piezas) {
-  if (!infoHash || piezas <= 0) return;
-
-  if (typeof window.registrarTransaccionP2P === "function") {
-    window.registrarTransaccionP2P(infoHash, tipo, piezas);
-  }
-
-  // Garantizar persistencia en BD local si registrarTransaccionP2P fue sobrescrita por app.js
-  if (typeof window.obtenerBDTorrents === "function" && typeof window.guardarBDTorrents === "function") {
-    const db = window.obtenerBDTorrents();
-    const registro = db[infoHash];
-    if (!registro || (tipo === "download" && !registro.piezasRecibidas)) {
-      const precioPieza = window.PRICE_PER_PIECE || PRICE_PER_PIECE;
-      if (!db[infoHash]) {
-        db[infoHash] = { infoHash, gastoTotal: 0, gananciaTotal: 0, piezasRecibidas: 0, piezasEnviadas: 0 };
-      }
-      if (tipo === "download") {
-        db[infoHash].piezasRecibidas = (Number(db[infoHash].piezasRecibidas) || 0) + piezas;
-        db[infoHash].gastoTotal = Number(((Number(db[infoHash].gastoTotal) || 0) + (piezas * precioPieza)).toFixed(10));
-      } else if (tipo === "upload") {
-        db[infoHash].piezasEnviadas = (Number(db[infoHash].piezasEnviadas) || 0) + piezas;
-        db[infoHash].gananciaTotal = Number(((Number(db[infoHash].gananciaTotal) || 0) + (piezas * precioPieza * 0.6)).toFixed(10));
-      }
-      window.guardarBDTorrents(db);
-    }
-  }
-}
-
-/**
  * Engancha extensión Nano y listeners de transferencia a un Wire individual.
  */
 function enlazarWire(torrent, wire) {
@@ -130,19 +98,23 @@ function enlazarWire(torrent, wire) {
   }
 
   wire.on("upload", (bytes) => {
-    if (!bytes || bytes <= 0) return;
+    if (!bytes || bytes <= 0 || !torrent.infoHash) return;
     registrarActividadPeer(torrent.infoHash, wire.peerId, bytes / WIRE_CHUNK_BYTES);
   });
 
   wire.on("download", (bytes) => {
-    if (!bytes || bytes <= 0) return;
+    if (!bytes || bytes <= 0 || !torrent.infoHash) return;
     registrarActividadPeer(torrent.infoHash, wire.peerId, bytes / WIRE_CHUNK_BYTES);
+  });
+
+  wire.once("close", () => {
+    wire._nanflixWireBound = false;
   });
 }
 
 /**
  * Vincula de forma centralizada los eventos de contabilidad P2P (upload/download)
- * normalizados a bloques de 16 KB.
+ * normalizados a bloques de 16 KB hacia la fachada única en app.js.
  */
 function vincularEventosContabilidad(torrent, esCreador = false) {
   if (!torrent || torrent._nanflixEventsBound) return;
@@ -150,17 +122,23 @@ function vincularEventosContabilidad(torrent, esCreador = false) {
 
   // 1. Captura global de Carga (Seeder enviando a Leechers)
   torrent.on("upload", (bytes) => {
-    if (!bytes || bytes <= 0) return;
+    if (!bytes || bytes <= 0 || !torrent.infoHash) return;
     const piezas = bytes / WIRE_CHUNK_BYTES;
-    notificarContabilidadP2P(torrent.infoHash, "upload", piezas);
+
+    if (typeof window.registrarTransaccionP2P === "function") {
+      window.registrarTransaccionP2P(torrent.infoHash, "upload", piezas);
+    }
     programarActualizacionUI(torrent, esCreador);
   });
 
   // 2. Captura global de Descarga (Leecher recibiendo de Seeders)
   torrent.on("download", (bytes) => {
-    if (!bytes || bytes <= 0) return;
+    if (!bytes || bytes <= 0 || !torrent.infoHash) return;
     const piezas = bytes / WIRE_CHUNK_BYTES;
-    notificarContabilidadP2P(torrent.infoHash, "download", piezas);
+
+    if (typeof window.registrarTransaccionP2P === "function") {
+      window.registrarTransaccionP2P(torrent.infoHash, "download", piezas);
+    }
     programarActualizacionUI(torrent, false);
   });
 
@@ -193,8 +171,7 @@ function conectarTorrent(magnetURI) {
 
   const infoHashTarget = magnetURI.match(/btih:([a-fA-F0-9]{40})/i)?.[1]?.toLowerCase() || null;
 
-  // Extracción segura de creator_wallet mediante expresión regular
- // Extracción segura de creator_wallet mediante expresión regular (Alfabeto Base32 Nano)
+  // Extracción segura de creator_wallet mediante expresión regular (Alfabeto Base32 Nano)
   try {
     const matchWallet = magnetURI.match(/(?:creator_wallet=|creator=)((?:nano|xrb)_[13][13456789abcdefghijkmnopqrstuwxyz]{59})/i);
     const creatorWallet = matchWallet ? matchWallet[1].toLowerCase() : null;
@@ -285,8 +262,24 @@ function pausarTorrent(infoHash) {
   const torrent = wtClient.get(infoHash);
   if (torrent) {
     torrent.pause();
+    if (Array.isArray(torrent.wires)) {
+      torrent.wires.forEach((wire) => {
+        try { wire.interested = false; } catch (e) {}
+      });
+    }
+
+    const statusEl = document.getElementById(`status-${infoHash}`);
+    if (statusEl) {
+      statusEl.innerText = "Pausado";
+      statusEl.className = "p-2.5 text-amber-500 font-sans font-semibold";
+    }
+
+    const row = document.getElementById(`row-${infoHash}`);
+    if (row) row.setAttribute("data-estado", "pausados");
+
     const downSpeedEl = document.getElementById(`down-speed-${infoHash}`);
     if (downSpeedEl) downSpeedEl.innerText = "0.0 KB/s";
+
     const upSpeedEl = document.getElementById(`up-speed-${infoHash}`);
     if (upSpeedEl) upSpeedEl.innerText = "0.0 KB/s";
   }
@@ -297,6 +290,12 @@ function reanudarTorrent(infoHash) {
   const torrent = wtClient.get(infoHash);
   if (torrent) {
     torrent.resume();
+    if (Array.isArray(torrent.wires)) {
+      torrent.wires.forEach((wire) => {
+        try { wire.interested = true; } catch (e) {}
+      });
+    }
+
     const esCreador = torrent.progress === 1 || torrent.uploaded > 0;
     if (typeof window.actualizarFilaTabla === "function") {
       window.actualizarFilaTabla(torrent, esCreador);

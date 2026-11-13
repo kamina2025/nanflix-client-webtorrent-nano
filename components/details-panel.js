@@ -1,5 +1,5 @@
 // ============================================================
-// COMPONENTE: WEB COMPONENT DEL PANEL DE DETALLES (BATCHED & OPTIMIZADO)
+// COMPONENTE: WEB COMPONENT DEL PANEL DE DETALLES (BATCHED & BLINDADO)
 // ============================================================
 
 class NanflixDetailsPanel extends HTMLElement {
@@ -7,6 +7,8 @@ class NanflixDetailsPanel extends HTMLElement {
     super();
     this._initialized = false;
     this._batchTimer = null;
+    this._liquidando = false;
+    this._maxLogEntries = 100;
     this._pendingStats = {
       recibidos: 0,
       gastos: 0,
@@ -18,7 +20,7 @@ class NanflixDetailsPanel extends HTMLElement {
 
   connectedCallback() {
     if (this._initialized) {
-      console.log("ℹ️ [NanFlix UI] NanflixDetailsPanel ya inicializado. Omitiendo renderizado.");
+      this._volcarEstadisticasDOM();
       return;
     }
 
@@ -46,7 +48,6 @@ class NanflixDetailsPanel extends HTMLElement {
 
             <!-- TAB 2: LIQUIDACIONES Y HANDSHAKE (CONTABILIDAD SEPARADA) -->
             <div id="tab-content-liquidaciones" class="tab-content hidden space-y-3 font-mono text-xs">
-                <!-- Métricas de Chunks y XNO divididos por Enviados y Recibidos -->
                 <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
                     <!-- Recibidos (Gastos) -->
                     <div class="bg-slate-950 p-2.5 rounded border border-rose-900/40 bg-rose-950/10">
@@ -70,9 +71,9 @@ class NanflixDetailsPanel extends HTMLElement {
                 </div>
 
                 <!-- Botón de Liquidación -->
-                <div class="bg-slate-950 p-2.5 rounded border border-slate-800 flex items-center justify-between">
+                <div class="bg-slate-950 p-2.5 rounded border border-slate-800 flex items-center justify-between gap-2">
                     <span class="text-[11px] text-slate-400 hidden sm:inline">Ejecutar pago a peers y creador en la Blockchain Nano:</span>
-                    <button id="btn-ejecutar-liquidacion" class="w-full sm:w-auto px-5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 rounded text-xs transition-all shadow-md active:scale-95">
+                    <button id="btn-ejecutar-liquidacion" class="w-full sm:w-auto px-5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-2 rounded text-xs transition-all shadow-md active:scale-95">
                         ⚡ Ejecutar Liquidación en Red Nano Real
                     </button>
                 </div>
@@ -104,7 +105,7 @@ class NanflixDetailsPanel extends HTMLElement {
                             <thead class="bg-slate-900/80 text-slate-400 border-b border-slate-800 sticky top-0">
                                 <tr>
                                     <th class="p-2">Identificador Peer</th>
-                                    <th class="p-2">Piezas Enviadas</th>
+                                    <th class="p-2">Piezas Transferidas</th>
                                     <th class="p-2">Dirección Billetera Nano</th>
                                 </tr>
                             </thead>
@@ -122,6 +123,7 @@ class NanflixDetailsPanel extends HTMLElement {
     this._cacheDOMReferences();
     this.bindEvents();
     this._initialized = true;
+    this._volcarEstadisticasDOM();
     console.log("✅ [NanFlix UI] NanflixDetailsPanel inicializado y listo en el DOM.");
   }
 
@@ -137,6 +139,7 @@ class NanflixDetailsPanel extends HTMLElement {
     this._elGastos = this.querySelector('#stat-gastos-xno');
     this._elEnviados = this.querySelector('#stat-chunks-enviados');
     this._elIngresos = this.querySelector('#stat-ingresos-xno');
+    this._btnLiquidar = this.querySelector('#btn-ejecutar-liquidacion');
     this._handshakeLog = this.querySelector('#handshake-log');
     this._peersTableBody = this.querySelector('#peers-table-body');
   }
@@ -158,11 +161,15 @@ class NanflixDetailsPanel extends HTMLElement {
 
         if (typeof window.cambiarTabDetalle === 'function') {
           window.cambiarTabDetalle(tabTarget);
+        } else if (tabTarget === 'peers' && typeof window.renderizarTablaPeers === 'function') {
+          window.renderizarTablaPeers();
         }
       });
     });
 
-    this.querySelector('#btn-ejecutar-liquidacion')?.addEventListener('click', () => {
+    this._btnLiquidar?.addEventListener('click', async () => {
+      if (this._liquidando) return;
+
       console.log("⚡ [NanFlix UI] Clic en botón 'Ejecutar Liquidación en Red Nano Real'");
       this.dispatchEvent(
         new CustomEvent('ejecutar-liquidacion', {
@@ -171,8 +178,20 @@ class NanflixDetailsPanel extends HTMLElement {
         })
       );
 
-      if (typeof window.ejecutarLiquidacionOnChain === 'function') {
-        window.ejecutarLiquidacionOnChain();
+      if (typeof window.ejecutarLiquidacionOnChain !== 'function') {
+        const msg = "⚠️ Motor de liquidación (window.ejecutarLiquidacionOnChain) no disponible en memoria.";
+        console.error(msg);
+        this.agregarLogHandshake(msg, "error");
+        return;
+      }
+
+      this._setEstadoLiquidando(true);
+      try {
+        await window.ejecutarLiquidacionOnChain();
+      } catch (err) {
+        this.agregarLogHandshake(`❌ Error ejecutando liquidación: ${err?.message || err}`, "error");
+      } finally {
+        this._setEstadoLiquidando(false);
       }
     });
 
@@ -189,6 +208,16 @@ class NanflixDetailsPanel extends HTMLElement {
         window.renderizarTablaPeers();
       }
     });
+  }
+
+  _setEstadoLiquidando(activo) {
+    this._liquidando = Boolean(activo);
+    if (!this._btnLiquidar) return;
+
+    this._btnLiquidar.disabled = this._liquidando;
+    this._btnLiquidar.textContent = this._liquidando
+      ? "⏳ Procesando Bloques en Red Nano..."
+      : "⚡ Ejecutar Liquidación en Red Nano Real";
   }
 
   cambiarTab(tabName) {
@@ -210,10 +239,14 @@ class NanflixDetailsPanel extends HTMLElement {
     }
   }
 
-  /**
-   * Actualiza las estadísticas contables agrupando llamadas en memoria cada 250 ms.
-   * Precisión ajustada a 10 decimales para tarifas Nano de micropagos (1e-10 XNO).
-   */
+  _volcarEstadisticasDOM() {
+    const { recibidos, gastos, enviados, ingresos } = this._pendingStats;
+    if (this._elRecibidos) this._elRecibidos.textContent = `${recibidos.toFixed(0)} chunks`;
+    if (this._elGastos) this._elGastos.textContent = `${gastos.toFixed(10)} XNO`;
+    if (this._elEnviados) this._elEnviados.textContent = `${enviados.toFixed(0)} chunks`;
+    if (this._elIngresos) this._elIngresos.textContent = `${ingresos.toFixed(10)} XNO`;
+  }
+
   actualizarLiquidaciones(chunksRecibidos = 0, gastosXNO = 0, chunksEnviados = 0, ingresosXNO = 0) {
     if (typeof chunksRecibidos === 'object' && chunksRecibidos !== null) {
       const data = chunksRecibidos;
@@ -231,39 +264,32 @@ class NanflixDetailsPanel extends HTMLElement {
     if (this._batchTimer) return;
 
     this._batchTimer = setTimeout(() => {
-      const { recibidos, gastos, enviados, ingresos } = this._pendingStats;
-
-      if (this._elRecibidos) this._elRecibidos.textContent = `${recibidos.toFixed(0)} chunks`;
-      if (this._elGastos) this._elGastos.textContent = `${gastos.toFixed(10)} XNO`;
-      if (this._elEnviados) this._elEnviados.textContent = `${enviados.toFixed(0)} chunks`;
-      if (this._elIngresos) this._elIngresos.textContent = `${ingresos.toFixed(10)} XNO`;
-
+      this._volcarEstadisticasDOM();
       this._batchTimer = null;
     }, 250);
   }
 
-  /**
-   * Agrega entradas al log de Handshake de forma segura evitando XSS.
-   */
   agregarLogHandshake(mensaje, tipo = 'info') {
     const container = this._handshakeLog || this.querySelector('#handshake-log');
     if (!container) return;
 
     const logEntry = document.createElement('div');
-    logEntry.className = tipo === 'exito' 
-      ? 'text-emerald-400' 
-      : tipo === 'error' 
-      ? 'text-rose-400' 
+    logEntry.className = tipo === 'exito'
+      ? 'text-emerald-400'
+      : tipo === 'error'
+      ? 'text-rose-400'
       : 'text-slate-400';
 
     logEntry.textContent = `[${new Date().toLocaleTimeString()}] ${String(mensaje)}`;
     container.appendChild(logEntry);
+
+    while (container.children.length > this._maxLogEntries) {
+      container.removeChild(container.firstElementChild);
+    }
+
     container.scrollTop = container.scrollHeight;
   }
 
-  /**
-   * Renderiza la tabla de peers utilizando DocumentFragment de alto rendimiento.
-   */
   actualizarPeersTabla(peersArray = []) {
     const tbody = this._peersTableBody || this.querySelector('#peers-table-body');
     if (!tbody) return;

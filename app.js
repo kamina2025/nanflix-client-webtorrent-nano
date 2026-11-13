@@ -1,21 +1,65 @@
 // ============================================================
-// CICLO DE VIDA & ORQUESTACIÓN DE APLICACIÓN (APP.JS) - AUDITADO Y CORREGIDO
+// CICLO DE VIDA & ORQUESTACIÓN DE APLICACIÓN (APP.JS) - AUDITADO
 // ============================================================
 
-// 1. Estado Global P2P y Liquidaciones Nano en Memoria (Raw / BigInt)
-// 0.0000000001 XNO en RAW = 10^-10 * 10^30 = 1e20 RAW (100000000000000000000n)
-const RAW_POR_PIEZA = 100000000000000000000n; 
+// 1. Tarifa base: 0.0000000001 XNO (1e-10 XNO) = 1e20 RAW por pieza de 16 KB
+const RAW_POR_PIEZA = 100000000000000000000n;
+window.RAW_POR_PIEZA = RAW_POR_PIEZA;
 
-window.appState = window.appState || {
-  myWallet: localStorage.getItem("nanflix_wallet") || null
-};
+window.appState = Object.assign(
+  {
+    myWallet: localStorage.getItem("nanflix_wallet") || null,
+    chunksRecibidos: 0,
+    chunksEnviados: 0,
+    montoAcumulado: 0
+  },
+  window.appState || {}
+);
 
-window.p2pStats = window.p2pStats || {
-  chunksRecibidos: 0,
-  gastosRaw: 0n,
-  chunksEnviados: 0,
-  ingresosRaw: 0n
-};
+window.p2pStats = Object.assign(
+  {
+    chunksRecibidos: 0,
+    gastosRaw: 0n,
+    chunksEnviados: 0,
+    ingresosRaw: 0n
+  },
+  window.p2pStats || {}
+);
+
+// Preservar referencia si base-datos.js cargó antes que app.js
+const _persistirTransaccionBD =
+  typeof window.registrarTransaccionBD === "function"
+    ? window.registrarTransaccionBD
+    : typeof window.registrarTransaccionP2P === "function" &&
+      window.registrarTransaccionP2P.name !== "registrarTransaccionP2P"
+    ? window.registrarTransaccionP2P
+    : null;
+
+/**
+ * Inicializa el listener WebSocket de auto-receive y reclama bloques pendientes
+ * una vez que la billetera local está cargada en memoria o localStorage.
+ */
+function iniciarServiciosNanoWallet(walletOverride = null) {
+  const walletActiva =
+    walletOverride ||
+    window.appState?.myWallet ||
+    localStorage.getItem("nanflix_wallet");
+
+  if (!walletActiva) return;
+
+  if (window.appState) {
+    window.appState.myWallet = walletActiva;
+  }
+
+  const passphrase = window.appState?.passphrase || "";
+
+  if (typeof window.iniciarEscuchaCreador === "function") {
+    window.iniciarEscuchaCreador(walletActiva, passphrase);
+  }
+  if (typeof window.reclamarPendientesNano === "function") {
+    window.reclamarPendientesNano(walletActiva, passphrase);
+  }
+}
 
 // 2. Inicialización Principal al Cargar el DOM
 document.addEventListener("DOMContentLoaded", () => {
@@ -25,10 +69,10 @@ document.addEventListener("DOMContentLoaded", () => {
     window.cargarSeedLocal();
   }
 
-  // Restaurar métricas acumuladas desde la BD local si existen
   hidratarEstadisticasDesdeBD();
   registrarServiceWorker();
   actualizarMetricasLiquidacion();
+  iniciarServiciosNanoWallet();
 });
 
 // 3. Registro de PWA Service Worker
@@ -42,7 +86,7 @@ function registrarServiceWorker() {
 }
 
 /**
- * Reconstruye el estado p2pStats a partir de la BD local guardada en localStorage
+ * Reconstruye p2pStats y appState a partir de la BD local guardada en localStorage
  */
 function hidratarEstadisticasDesdeBD() {
   if (typeof window.obtenerBDTorrents !== "function") return;
@@ -56,10 +100,21 @@ function hidratarEstadisticasDesdeBD() {
 
     Object.values(db).forEach((item) => {
       if (!item) return;
-      if (item.piezasRecibidas) acumuladoRecibidos += Number(item.piezasRecibidas) || 0;
-      if (item.piezasEnviadas) acumuladoEnviados += Number(item.piezasEnviadas) || 0;
-      if (item.gastoRaw) acumuladoGastosRaw += BigInt(item.gastoRaw || "0");
-      if (item.gananciaRaw) acumuladoIngresosRaw += BigInt(item.gananciaRaw || "0");
+      const gRaw = BigInt(item.gastoRaw || "0");
+      const iRaw = BigInt(item.gananciaRaw || "0");
+
+      // Normalizar campos flotantes derivados si faltaban en registros previos
+      if (gRaw > 0n && !item.gastoTotal) {
+        item.gastoTotal = Number((Number(gRaw) / 1e30).toFixed(10));
+      }
+      if (iRaw > 0n && !item.gananciaTotal) {
+        item.gananciaTotal = Number((Number(iRaw) / 1e30).toFixed(10));
+      }
+
+      acumuladoRecibidos += Number(item.piezasRecibidas) || 0;
+      acumuladoEnviados += Number(item.piezasEnviadas) || 0;
+      acumuladoGastosRaw += gRaw;
+      acumuladoIngresosRaw += iRaw;
     });
 
     window.p2pStats.chunksRecibidos = acumuladoRecibidos;
@@ -67,6 +122,7 @@ function hidratarEstadisticasDesdeBD() {
     window.p2pStats.gastosRaw = acumuladoGastosRaw;
     window.p2pStats.ingresosRaw = acumuladoIngresosRaw;
 
+    sincronizarAppState();
     console.log("📊 [NanFlix App] Métricas restauradas desde almacenamiento local.");
   } catch (err) {
     console.warn("⚠️ [NanFlix App] No se pudo hidratar p2pStats desde la BD:", err);
@@ -74,53 +130,94 @@ function hidratarEstadisticasDesdeBD() {
 }
 
 /**
- * 4. Registra cada bloque P2P transferido (Upload / Download) segregando
- *    chunks e ingresos/gastos en BigInt para evitar deriva flotante.
+ * Mantiene window.appState alineado con window.p2pStats para NanFlixDebug y módulos legacy
+ */
+function sincronizarAppState() {
+  const gastosXNO = Number(window.p2pStats.gastosRaw) / 1e30;
+  window.appState.chunksRecibidos = window.p2pStats.chunksRecibidos;
+  window.appState.chunksEnviados = window.p2pStats.chunksEnviados;
+  window.appState.montoAcumulado = Number(gastosXNO.toFixed(10));
+}
+
+/**
+ * 4. Punto único de entrada contable: actualiza RAM (BigInt) + Persistencia JSON (localStorage)
  */
 function registrarTransaccionP2P(infoHash, tipo, piezas) {
   const numPiezas = Number(piezas) || 0;
-  
-  // Guardián contra deltas nulos o flotantes inválidos
-  if (numPiezas <= 0) return;
+  if (!infoHash || numPiezas <= 0) return;
 
-  const piezasEscaladas = BigInt(Math.round(numPiezas * 1000));
+  // Escala 1e6 para evitar truncamiento en transferencias sub-pieza
+  const piezasEscaladas = BigInt(Math.round(numPiezas * 1000000));
 
   if (tipo === "upload") {
-    // SEEDER: Incrementar Chunks Enviados e Ingresos con el factor 0.6 (60%)
-    const deltaRaw = (RAW_POR_PIEZA * piezasEscaladas * 6n) / 10000n;
+    // SEEDER: 60% de la tarifa base
+    const deltaRaw = (RAW_POR_PIEZA * piezasEscaladas * 6n) / 10000000n;
     window.p2pStats.chunksEnviados += numPiezas;
     window.p2pStats.ingresosRaw += deltaRaw;
   } else if (tipo === "download") {
-    // LEECHER: Incrementar Chunks Recibidos y Gastos al 100%
-    const deltaRaw = (RAW_POR_PIEZA * piezasEscaladas) / 1000n;
+    // LEECHER: 100% de la tarifa base
+    const deltaRaw = (RAW_POR_PIEZA * piezasEscaladas) / 1000000n;
     window.p2pStats.chunksRecibidos += numPiezas;
     window.p2pStats.gastosRaw += deltaRaw;
+  } else {
+    return;
   }
 
+  // Persistir en BD local por infoHash sin colisión de nombres
+  if (typeof window.registrarTransaccionBD === "function") {
+    window.registrarTransaccionBD(infoHash, tipo, numPiezas);
+  } else if (_persistirTransaccionBD) {
+    _persistirTransaccionBD(infoHash, tipo, numPiezas);
+  } else if (typeof window.obtenerBDTorrents === "function" && typeof window.guardarBDTorrents === "function") {
+    const db = window.obtenerBDTorrents();
+    if (!db[infoHash]) {
+      db[infoHash] = {
+        infoHash,
+        gastoTotal: 0,
+        gananciaTotal: 0,
+        piezasRecibidas: 0,
+        piezasEnviadas: 0,
+        gastoRaw: "0",
+        gananciaRaw: "0"
+      };
+    }
+    const reg = db[infoHash];
+    if (tipo === "download") {
+      const deltaRaw = (RAW_POR_PIEZA * piezasEscaladas) / 1000000n;
+      reg.piezasRecibidas = (Number(reg.piezasRecibidas) || 0) + numPiezas;
+      reg.gastoRaw = (BigInt(reg.gastoRaw || "0") + deltaRaw).toString();
+      reg.gastoTotal = Number((Number(reg.gastoRaw) / 1e30).toFixed(10));
+    } else {
+      const deltaRaw = (RAW_POR_PIEZA * piezasEscaladas * 6n) / 10000000n;
+      reg.piezasEnviadas = (Number(reg.piezasEnviadas) || 0) + numPiezas;
+      reg.gananciaRaw = (BigInt(reg.gananciaRaw || "0") + deltaRaw).toString();
+      reg.gananciaTotal = Number((Number(reg.gananciaRaw) / 1e30).toFixed(10));
+    }
+    window.guardarBDTorrents(db);
+  }
+
+  sincronizarAppState();
   actualizarMetricasLiquidacion();
 }
 
 /**
  * 5. Sincroniza las métricas contables globales con el Web Component NanflixDetailsPanel
- *    y mantiene fallbacks defensivos para el DOM tradicional.
  */
 function actualizarMetricasLiquidacion() {
-  const panelComponent = document.querySelector("nanflix-details-panel");
+  sincronizarAppState();
 
-  // Conversión de Raw BigInt a float XNO formateado (1 XNO = 1e30 Raw)
+  const panelComponent = document.querySelector("nanflix-details-panel");
   const gastosXNO = Number(window.p2pStats.gastosRaw) / 1e30;
   const ingresosXNO = Number(window.p2pStats.ingresosRaw) / 1e30;
 
-  // 1. Delegar renderizado al Web Component usando la firma por Objeto Estructurado
   if (panelComponent && typeof panelComponent.actualizarLiquidaciones === "function") {
     panelComponent.actualizarLiquidaciones({
       chunksRecibidos: window.p2pStats.chunksRecibidos,
-      gastosXNO: gastosXNO,
+      gastosXNO,
       chunksEnviados: window.p2pStats.chunksEnviados,
-      ingresosXNO: ingresosXNO
+      ingresosXNO
     });
   } else {
-    // 2. Fallback a búsqueda global en el DOM tradicional
     const elRecibidos = document.getElementById("stat-chunks-recibidos") || document.getElementById("stat-piezas-total");
     const elGastos = document.getElementById("stat-gastos-xno") || document.getElementById("stat-monto-liquidar");
     const elEnviados = document.getElementById("stat-chunks-enviados");
@@ -144,7 +241,6 @@ function registrarHandshakeLog(msg, tipo = "info") {
     return;
   }
 
-  // Fallback DOM manual
   const log = document.getElementById("handshake-log") || document.getElementById("logs");
   if (log) {
     const div = document.createElement("div");
@@ -160,3 +256,4 @@ window.registrarTransaccionP2P = registrarTransaccionP2P;
 window.actualizarMetricasLiquidacion = actualizarMetricasLiquidacion;
 window.registrarHandshakeLog = registrarHandshakeLog;
 window.hidratarEstadisticasDesdeBD = hidratarEstadisticasDesdeBD;
+window.iniciarServiciosNanoWallet = iniciarServiciosNanoWallet;
